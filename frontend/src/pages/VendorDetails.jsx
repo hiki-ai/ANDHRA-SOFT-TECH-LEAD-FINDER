@@ -71,7 +71,7 @@ export function VendorDetails() {
   const handleSave = (e) => {
     e.preventDefault();
     setIsEditing(false);
-    toast.success('Vendor profile updated successfully in PostgreSQL.');
+    toast.success('Vendor profile updated successfully in Firestore.');
   };
 
   const handleDelete = () => {

@@ -111,12 +111,12 @@ export function Home() {
                 Data Management
               </h3>
               <p className="text-xs text-surface-600 leading-relaxed mb-4">
-                PostgreSQL repository with automated deduplication keys, phone normalization, data quality score calculations, and administrator-defined custom fields.
+                Firebase Firestore cloud repository with automated deduplication keys, phone normalization, data quality score calculations, and administrator-defined custom fields.
               </p>
             </div>
             <div className="pt-4 border-t border-surface-100 flex items-center justify-between text-xs text-surface-500">
               <span className="font-semibold text-surface-700">Dynamic Columns</span>
-              <span className="font-mono text-brand-600 font-medium">JSONB / Indexed</span>
+              <span className="font-mono text-brand-600 font-medium">Firestore / Indexed</span>
             </div>
           </div>
 

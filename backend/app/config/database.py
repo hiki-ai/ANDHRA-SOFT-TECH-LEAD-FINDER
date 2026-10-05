@@ -1,14 +1,11 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
-from .settings import Settings
-
-engine = create_engine(Settings.DATABASE_URL, pool_pre_ping=True)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+"""
+Database configuration module.
+NOTE: PostgreSQL / SQLAlchemy has been completely migrated to Firebase Cloud Firestore.
+This module provides backward-compatibility stubs pointing to Firestore.
+"""
+from .firebase import get_firestore_db
 
 def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    """Yields the active Firebase Firestore client."""
+    db = get_firestore_db()
+    yield db

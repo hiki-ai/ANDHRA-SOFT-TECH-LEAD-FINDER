@@ -1,13 +1,15 @@
-from datetime import datetime
-from sqlalchemy import Column, String, DateTime
-from ..config.database import Base
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Optional, Dict, Any
 
-class User(Base):
-    __tablename__ = 'users'
+@dataclass
+class User:
+    id: str  # Firebase UID
+    email: str
+    display_name: Optional[str] = None
+    role: str = "admin"
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    last_login: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
-    id = Column(String(128), primary_key=True) # Firebase UID
-    email = Column(String(255), unique=True, nullable=False)
-    display_name = Column(String(150))
-    role = Column(String(50), default='admin')
-    created_at = Column(DateTime, default=datetime.utcnow)
-    last_login = Column(DateTime, default=datetime.utcnow)
+    def to_dict(self) -> Dict[str, Any]:
+        return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}

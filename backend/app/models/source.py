@@ -1,15 +1,17 @@
 import uuid
-from datetime import datetime
-from sqlalchemy import Column, String, Integer, Boolean, DateTime
-from ..config.database import Base
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Optional, Dict, Any
 
-class Source(Base):
-    __tablename__ = 'sources'
+@dataclass
+class Source:
+    name: str
+    connector_type: str
+    id: str = field(default_factory=lambda: f"src_{uuid.uuid4().hex[:8]}")
+    base_url: Optional[str] = None
+    rate_limit_per_min: int = 60
+    is_active: bool = True
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
-    id = Column(String(64), primary_key=True, default=lambda: f"src_{uuid.uuid4().hex[:8]}")
-    name = Column(String(150), nullable=False)
-    connector_type = Column(String(100), nullable=False)
-    base_url = Column(String(500))
-    rate_limit_per_min = Column(Integer, default=60)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    def to_dict(self) -> Dict[str, Any]:
+        return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}

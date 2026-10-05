@@ -27,7 +27,7 @@ Admin initiates collection from Frontend (UI)
    ↓
 POST /api/v1/collections (Flask API)
    ↓
-Collection Job Record created in Supabase (status: 'pending')
+Collection Job Record created in Firebase Firestore (status: 'pending')
    ↓
 Worker Service picks up Job
    ↓
@@ -41,7 +41,7 @@ Validator (business name, phone format, pincode)
    ↓
 Deduplicator (generates dedupe_key: normalized_name + phone + city)
    ↓
-Bulk Upsert into Supabase PostgreSQL (Batch size: 500)
+Bulk Batch Upsert into Firebase Cloud Firestore (Batch size <= 450)
    ↓
 Progress & Statistics Updated (Found, Valid, Duplicate, Failed)
    ↓

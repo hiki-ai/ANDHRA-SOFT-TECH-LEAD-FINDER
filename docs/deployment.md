@@ -8,6 +8,7 @@
 - **Backend API**: Render (Python Web Service with Gunicorn)
   - Build command: `pip install -r requirements.txt`
   - Start command: `gunicorn run:app`
-  - Environment variables: `DATABASE_URL`, `FIREBASE_*`, `SECRET_KEY`
-- **Database**: Supabase PostgreSQL
-- **Worker**: Render Background Worker or Celery / Redis
+  - Environment variables: `FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, `SECRET_KEY`
+- **Database**: Firebase Cloud Firestore
+- **Authentication**: Firebase Authentication
+- **Worker**: Render Background Worker

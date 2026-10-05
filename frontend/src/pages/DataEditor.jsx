@@ -161,7 +161,7 @@ export function DataEditor() {
 
   const handleSaveChanges = () => {
     setDirtyRows(new Set());
-    toast.success(`Saved modifications for ${dirtyRows.size} record(s) to PostgreSQL.`);
+    toast.success(`Saved modifications for ${dirtyRows.size} record(s) to Firestore.`);
   };
 
   const handleDiscardChanges = () => {
@@ -534,7 +534,7 @@ export function DataEditor() {
               <span>Invalid Field Highlight</span>
             </span>
           </div>
-          <span>Changes are batched and synced directly to PostgreSQL upon Save.</span>
+          <span>Changes are batched and synced directly to Firestore upon Save.</span>
         </div>
       </div>
 
@@ -543,7 +543,7 @@ export function DataEditor() {
         isOpen={showAddColumnModal}
         onClose={() => setShowAddColumnModal(false)}
         title="Add Custom Spreadsheet Column"
-        subtitle="Create a new administrator-defined field stored in PostgreSQL JSONB."
+        subtitle="Create a new administrator-defined field stored in Firestore documents."
         maxWidth="sm"
       >
         <form onSubmit={handleAddColumn} className="space-y-4">

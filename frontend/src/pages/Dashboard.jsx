@@ -137,7 +137,7 @@ export function Dashboard() {
         <StatCard
           title="Total Vendors"
           value={formatNumber(142500)}
-          subtitle="In PostgreSQL repository"
+          subtitle="In Firestore repository"
           trend="+12.4%"
           trendDirection="up"
           icon={Users}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Search,
@@ -24,6 +24,8 @@ import { Input } from '../components/common/Input';
 import { Select } from '../components/common/Select';
 import { formatNumber, formatPercent, getQualityScoreColor } from '../utils/formatters';
 import { useToast } from '../context/ToastContext';
+import { vendorService } from '../services/vendorService';
+import { firestoreService } from '../services/firestoreService';
 
 // Realistic synthetic demo data (Section 48: Clearly labeled as DEMO DATA)
 const DEMO_VENDORS = [
@@ -149,6 +151,7 @@ const DEMO_VENDORS = [
 ];
 
 export function Vendors() {
+  const [vendorsList, setVendorsList] = useState(DEMO_VENDORS);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedLocation, setSelectedLocation] = useState('');
@@ -157,10 +160,31 @@ export function Vendors() {
   const toast = useToast();
   const navigate = useNavigate();
 
-  const filteredVendors = DEMO_VENDORS.filter((v) => {
+  useEffect(() => {
+    let isMounted = true;
+    async function loadData() {
+      try {
+        if (firestoreService.isReady()) {
+          await firestoreService.seedVendorsIfEmpty();
+        }
+        const res = await vendorService.getVendors();
+        if (isMounted && res?.data?.items?.length) {
+          setVendorsList(res.data.items);
+        }
+      } catch (err) {
+        console.info('[Vendors] Using local fallback dataset:', err?.message);
+      }
+    }
+    loadData();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const filteredVendors = vendorsList.filter((v) => {
     const matchesSearch =
       !searchTerm ||
-      v.business_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      v.business_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (v.phone && v.phone.includes(searchTerm)) ||
       (v.city && v.city.toLowerCase().includes(searchTerm.toLowerCase()));
 
@@ -185,7 +209,7 @@ export function Vendors() {
               Vendor Lead Database
             </h1>
             <span className="text-[11px] font-semibold bg-brand-50 text-brand-700 px-2.5 py-0.5 rounded-full border border-brand-200">
-              DEMO DATASET
+              {firestoreService.isReady() ? 'FIRESTORE CLOUD' : 'DEMO DATASET'}
             </span>
           </div>
           <p className="text-xs text-surface-500 mt-1">

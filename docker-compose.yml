@@ -1,25 +1,6 @@
 version: '3.8'
 
 services:
-  # Supabase / Local PostgreSQL Database
-  postgres:
-    image: postgres:16-alpine
-    container_name: ast_leads_postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgrespassword
-      POSTGRES_DB: andhra_soft_tech_leads
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   # Flask Backend API
   backend:
     build:
@@ -30,14 +11,12 @@ services:
     ports:
       - "5000:5000"
     environment:
-      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/andhra_soft_tech_leads
+      - FIREBASE_PROJECT_ID=andhra-soft-tech-lead-finder
+      - FIREBASE_STORAGE_BUCKET=andhra-soft-tech-lead-finder.firebasestorage.app
       - SECRET_KEY=dev_secret_key_ast_leads_2026
       - FLASK_ENV=development
       - FLASK_DEBUG=1
-      - CORS_ORIGINS=http://localhost:5173
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - CORS_ORIGINS=http://localhost:5173,http://localhost:3000
     volumes:
       - ./backend:/app
 
@@ -50,12 +29,9 @@ services:
     restart: unless-stopped
     command: python -m worker.collection_worker
     environment:
-      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/andhra_soft_tech_leads
+      - FIREBASE_PROJECT_ID=andhra-soft-tech-lead-finder
       - WORKER_CONCURRENCY=4
-      - BATCH_SIZE=500
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - BATCH_SIZE=450
     volumes:
       - ./backend:/app
 
@@ -70,11 +46,9 @@ services:
       - "5173:5173"
     environment:
       - VITE_API_URL=http://localhost:5000/api/v1
+      - VITE_FIREBASE_PROJECT_ID=andhra-soft-tech-lead-finder
     depends_on:
       - backend
     volumes:
       - ./frontend:/app
       - /app/node_modules
-
-volumes:
-  pgdata:

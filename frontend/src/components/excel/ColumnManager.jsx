@@ -26,7 +26,7 @@ export function ColumnManager({ isOpen, onClose, onAddColumn, columns = [] }) {
       isOpen={isOpen}
       onClose={onClose}
       title="Manage Spreadsheet Columns"
-      subtitle="Define custom fields stored in PostgreSQL JSONB."
+      subtitle="Define custom fields stored in Firestore documents."
       maxWidth="sm"
     >
       <form onSubmit={handleSubmit} className="space-y-4">

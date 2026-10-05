@@ -66,7 +66,7 @@ export function ExcelImport() {
     try {
       await new Promise((resolve) => setTimeout(resolve, 1500));
       setStep(3);
-      toast.success('Successfully imported 1,240 vendor records into PostgreSQL!');
+      toast.success('Successfully imported 1,240 vendor records into Firestore!');
     } catch {
       toast.error('Import process encountered an error.');
     } finally {
@@ -188,7 +188,7 @@ export function ExcelImport() {
             <div className="p-4 border-b border-surface-100 flex items-center justify-between">
               <h3 className="text-sm font-bold text-surface-900">Column Mapping</h3>
               <span className="text-xs text-surface-500">
-                Map columns from spreadsheet into PostgreSQL vendor attributes
+                Map columns from spreadsheet into Firestore vendor attributes
               </span>
             </div>
 
@@ -239,7 +239,7 @@ export function ExcelImport() {
             Import Completed Successfully
           </h3>
           <p className="text-xs text-surface-600 max-w-md mx-auto leading-relaxed">
-            1,240 records have been batch upserted into the PostgreSQL vendor repository with automated dedupe key generation and data quality scoring.
+            1,240 records have been batch upserted into the Firestore vendor repository with automated dedupe key generation and data quality scoring.
           </p>
 
           <div className="pt-4 flex items-center justify-center gap-3">

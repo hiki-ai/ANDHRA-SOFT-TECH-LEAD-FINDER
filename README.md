@@ -3,8 +3,8 @@
 > Enterprise-Grade Business Vendor Lead Collection & Management Platform
 
 [![Frontend](https://img.shields.io/badge/Frontend-React%20%2B%20Vite%20%2B%20TailwindCSS-blue)](#)
-[![Backend](https://img.shields.io/badge/Backend-Python%20%2B%20Flask%20%2B%20SQLAlchemy-green)](#)
-[![Database](https://img.shields.io/badge/Database-PostgreSQL%20%2F%20Supabase-darkblue)](#)
+[![Backend](https://img.shields.io/badge/Backend-Python%20%2B%20Flask%20%2B%20Firebase--Admin-green)](#)
+[![Database](https://img.shields.io/badge/Database-Firebase%20Cloud%20Firestore-orange)](#)
 [![Auth](https://img.shields.io/badge/Auth-Firebase%20Authentication-orange)](#)
 
 ---
@@ -15,7 +15,7 @@
 
 ### Core Capabilities:
 - **Asynchronous Data Collection Pipeline**: Configurable rate limits, source throttling, exponential backoff, and strict terms compliance.
-- **Enterprise Vendor Database**: Normalized schemas in PostgreSQL with automated deduplication keys and dynamic data quality scoring.
+- **Enterprise Vendor Database**: Scalable Cloud Firestore document repository with automated deduplication keys and dynamic data quality scoring.
 - **Spreadsheet Data Editor**: Virtualized, server-side paginated grid with inline cell editing, custom column management, and batch operations.
 - **Excel Import / Export Wizard**: Drag-and-drop file ingestion, field-level mapping, pre-import validation, and UTF-8 XLSX exports preserving clean formatting.
 - **Enterprise Design System**: Clean, high-readability SaaS interface adhering to white background, soft surfaces, slate typography, and blue/purple accents.
@@ -27,8 +27,9 @@
 ```mermaid
 graph TD
     Client["React 19 + Vite + Tailwind CSS"] --> |REST API / Bearer Token| API["Flask API Layer (gunicorn)"]
-    API --> Auth["Firebase Authentication"]
-    API --> DB[("Supabase PostgreSQL (500k+ records)")]
+    Client --> FirestoreClient["Firebase Cloud Firestore (Web SDK)"]
+    API --> Auth["Firebase Authentication (Admin SDK)"]
+    API --> DB[("Firebase Cloud Firestore (500k+ records)")]
     API --> Queue["Collection Jobs Queue"]
     Queue --> Worker["Python Background Workers"]
     Worker --> Manager["Source Manager"]
@@ -38,14 +39,14 @@ graph TD
 ```
 
 ### Stack Breakdown
-- **Frontend**: React 19, Vite, Tailwind CSS v3, React Router v7, TanStack Query v5, Lucide React, Axios.
-- **Backend (Phase 5+)**: Python, Flask, SQLAlchemy, Flask-Migrate / Alembic, Pandas, OpenPyXL.
+- **Frontend**: React 19, Vite, Tailwind CSS v3, React Router v7, TanStack Query v5, Lucide React, Axios, Firebase Web SDK v12.
+- **Backend**: Python, Flask, Firebase Admin SDK, Pandas, OpenPyXL.
 - **Authentication**: Firebase Authentication (Admin email/password with role-based extensibility).
-- **Database**: Supabase PostgreSQL with B-tree and composite indexing on dedupe keys and search parameters.
+- **Database**: Firebase Cloud Firestore with composite and single-field indexing on dedupe keys and search parameters.
 - **Deployment**:
   - Frontend: Netlify
   - Backend: Render
-  - Database: Supabase
+  - Database: Firebase Cloud Firestore
 
 ---
 
@@ -93,12 +94,12 @@ andhra-soft-tech-lead-finder/
 
 - [x] **PHASE 1: Frontend Foundation** (Vite, Tailwind, routing, design system, layout shell, reusable components, Home, Login, Dashboard shell)
 - [ ] **PHASE 2: Authentication Layer** (Firebase SDK integration, token persistence, role guards)
-- [ ] **PHASE 3: Flask Backend API & Database Schemas** (Supabase PostgreSQL migrations, models, REST endpoints)
+- [x] **PHASE 3: Flask Backend API & Cloud Firestore** (Firestore collections, models, REST endpoints, Firebase Admin SDK)
 - [ ] **PHASE 4: Vendor Management & Details** (CRUD, search, filters, data quality score calculator)
 - [ ] **PHASE 5: Spreadsheet / Data Editor** (Editable grid, dynamic custom columns, virtualization)
 - [ ] **PHASE 6: Excel Import & Export Engine** (Column mapper, validation report, clean XLSX exporter)
 - [ ] **PHASE 7: Collection Job System & Worker Pipeline** (Source connectors, rate throttling, deduplication)
-- [ ] **PHASE 8: Production Deployment & Scale Hardening** (Netlify, Render, Supabase benchmarks)
+- [ ] **PHASE 8: Production Deployment & Scale Hardening** (Netlify, Render, Firestore benchmarks)
 
 ---
 

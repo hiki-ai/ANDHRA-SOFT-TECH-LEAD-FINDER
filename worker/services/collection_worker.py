@@ -26,7 +26,7 @@ class CollectionWorker:
             normalized['status'] = 'valid' if is_valid else 'invalid'
 
             batch.append(normalized)
-            if len(batch) >= 500:
+            if len(batch) >= 450:
                 self.progress_service.commit_batch(job_id, batch)
                 batch = []
 

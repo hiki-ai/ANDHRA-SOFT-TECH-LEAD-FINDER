@@ -4,6 +4,7 @@ from .config.settings import Settings
 from .routes.auth_routes import auth_bp
 from .routes.vendor_routes import vendor_bp
 from .routes.collection_routes import collection_bp
+from .routes.dashboard_routes import dashboard_bp
 from .routes.import_routes import import_bp
 from .routes.export_routes import export_bp
 
@@ -18,11 +19,16 @@ def create_app():
     app.register_blueprint(auth_bp)
     app.register_blueprint(vendor_bp)
     app.register_blueprint(collection_bp)
+    app.register_blueprint(dashboard_bp)
     app.register_blueprint(import_bp)
     app.register_blueprint(export_bp)
 
     @app.route('/health', methods=['GET'])
     def health_check():
-        return {"status": "healthy", "service": "AST Lead Finder API"}
+        return {
+            "status": "healthy",
+            "service": "AST Lead Finder API",
+            "database": "Firebase Firestore"
+        }
 
     return app

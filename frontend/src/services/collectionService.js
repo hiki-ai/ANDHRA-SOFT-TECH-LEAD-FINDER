@@ -1,21 +1,42 @@
 /**
- * Collections API Service
+ * ==============================================================================
+ * ANDHRA SOFT TECH — LEAD FINDER
+ * COLLECTIONS SERVICE (API & FIRESTORE HYBRID)
+ * ==============================================================================
  * Location: frontend/src/services/collectionService.js
+ * ==============================================================================
  */
 
 import { apiClient } from './apiClient';
+import { firestoreService } from './firestoreService';
 
 export const collectionService = {
   async getCollections(params = {}) {
-    return apiClient.get('/collections', { params });
+    try {
+      return await apiClient.get('/collections', { params });
+    } catch {
+      const items = await firestoreService.getCollections();
+      return { success: true, data: items };
+    }
   },
 
   async getCollectionById(id) {
-    return apiClient.get(`/collections/${id}`);
+    try {
+      return await apiClient.get(`/collections/${id}`);
+    } catch {
+      const items = await firestoreService.getCollections();
+      const found = items.find((c) => c.id === id);
+      return { success: true, data: found || null };
+    }
   },
 
   async startCollection(data) {
-    return apiClient.post('/collections', data);
+    try {
+      return await apiClient.post('/collections', data);
+    } catch {
+      const created = await firestoreService.createCollection(data);
+      return { success: true, data: created, message: 'Collection job created successfully in Firestore' };
+    }
   },
 
   async pauseCollection(id) {

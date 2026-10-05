@@ -210,8 +210,8 @@ export function Settings() {
 
             <div className="p-3 bg-surface-50 rounded-xl border border-surface-100">
               <span className="text-[10px] uppercase font-semibold text-surface-400 block">Database</span>
-              <span className="font-bold text-surface-800">Supabase Postgres</span>
-              <span className="text-[10px] text-emerald-600 font-semibold block mt-0.5">500k+ Indexed</span>
+              <span className="font-bold text-surface-800">Firebase Firestore</span>
+              <span className="text-[10px] text-emerald-600 font-semibold block mt-0.5">500k+ Cloud NoSQL</span>
             </div>
 
             <div className="p-3 bg-surface-50 rounded-xl border border-surface-100">

@@ -1,17 +1,19 @@
 import uuid
-from datetime import datetime
-from sqlalchemy import Column, String, Integer, Boolean, DateTime
-from ..config.database import Base
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Optional, Dict, Any
 
-class CustomColumn(Base):
-    __tablename__ = 'custom_columns'
+@dataclass
+class CustomColumn:
+    name: str
+    label: str
+    id: str = field(default_factory=lambda: f"coldef_{uuid.uuid4().hex[:8]}")
+    data_type: str = "text"  # text, number, phone, email, date, boolean
+    position: int = 0
+    is_visible: bool = True
+    is_required: bool = False
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
-    id = Column(String(64), primary_key=True, default=lambda: f"coldef_{uuid.uuid4().hex[:8]}")
-    name = Column(String(100), unique=True, nullable=False)
-    label = Column(String(150), nullable=False)
-    data_type = Column(String(50), default='text') # text, number, phone, email, date, boolean
-    position = Column(Integer, default=0)
-    is_visible = Column(Boolean, default=True)
-    is_required = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    def to_dict(self) -> Dict[str, Any]:
+        return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
