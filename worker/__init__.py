@@ -1,0 +1,10 @@
+# Andhra Soft Tech — Lead Finder Worker Package
+"""
+Modular asynchronous background extraction workers.
+Phase 11-13 will implement:
+- Source connectors
+- Throttling & exponential backoff
+- Phone normalization
+- Deduplication pipeline
+- Batch upserts (500 records/batch) to PostgreSQL
+"""

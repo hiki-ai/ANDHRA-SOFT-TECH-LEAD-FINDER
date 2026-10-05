@@ -1,0 +1,9 @@
+User-agent: *
+Disallow: /dashboard
+Disallow: /vendors
+Disallow: /collections
+Disallow: /data-editor
+Disallow: /import
+Disallow: /settings
+Allow: /
+Allow: /login

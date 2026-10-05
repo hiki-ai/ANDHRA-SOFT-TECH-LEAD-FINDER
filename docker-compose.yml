@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  # Supabase / Local PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: ast_leads_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: andhra_soft_tech_leads
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Flask Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ast_leads_backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/andhra_soft_tech_leads
+      - SECRET_KEY=dev_secret_key_ast_leads_2026
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+      - CORS_ORIGINS=http://localhost:5173
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+
+  # Asynchronous Background Worker
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ast_leads_worker
+    restart: unless-stopped
+    command: python -m worker.collection_worker
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/andhra_soft_tech_leads
+      - WORKER_CONCURRENCY=4
+      - BATCH_SIZE=500
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+
+  # React Frontend (Vite)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ast_leads_frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:5000/api/v1
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+volumes:
+  pgdata:
