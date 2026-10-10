@@ -32,6 +32,8 @@ const LOCATIONS = [
   'Bengaluru, Karnataka',
 ];
 
+import { collectionService } from '../../services/collectionService';
+
 export function QuickCollectionModal({ isOpen, onClose, onJobCreated }) {
   const [category, setCategory] = useState('');
   const [location, setLocation] = useState('');
@@ -58,28 +60,19 @@ export function QuickCollectionModal({ isOpen, onClose, onJobCreated }) {
 
     setIsSubmitting(true);
     try {
-      // Simulate creating collection job
-      await new Promise((resolve) => setTimeout(resolve, 800));
-
-      const newJob = {
-        id: 'col_' + Math.random().toString(36).substring(2, 9),
-        category,
-        location,
+      const res = await collectionService.startCollection({
+        category: category.trim(),
+        location: location.trim(),
         target_count: parseInt(targetCount, 10),
-        status: 'running',
-        found: 0,
-        valid: 0,
-        duplicate: 0,
-        failed: 0,
-        progress: 0,
-        created_at: new Date().toISOString(),
-      };
+      });
 
+      const newJob = res?.data || res;
       toast.success(`Collection job initiated for ${category} in ${location}.`);
       if (onJobCreated) onJobCreated(newJob);
       onClose();
     } catch (err) {
-      toast.error('Failed to initiate collection job.');
+      console.error('[QuickCollectionModal] Error starting collection:', err);
+      toast.error(err?.message || 'Failed to initiate collection job on backend.');
     } finally {
       setIsSubmitting(false);
     }

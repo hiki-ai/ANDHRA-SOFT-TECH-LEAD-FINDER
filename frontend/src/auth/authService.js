@@ -24,52 +24,23 @@ export const authService = {
       throw new Error('Please enter both email and password.');
     }
 
-    // 1. Built-in developer admin preset (works anytime for immediate testing)
-    if (email === 'admin@andhrasofttech.com' && password === 'admin123') {
-      const devAdmin = {
-        uid: 'ast_admin_001',
-        email: 'admin@andhrasofttech.com',
-        displayName: 'Administrator',
+    if (!isFirebaseConfigured || !auth) {
+      throw new Error('Firebase Authentication is not configured. Please verify your environment variables.');
+    }
+
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const token = await userCredential.user.getIdToken();
+      const formatted = formatUser({
+        ...userCredential.user,
         role: 'admin',
-        token: 'dev_mock_jwt_ast_admin_2026',
-        createdAt: new Date().toISOString(),
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(devAdmin));
-      return devAdmin;
+        token,
+      });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(formatted));
+      return formatted;
+    } catch (error) {
+      throw new Error(getAuthErrorMessage(error));
     }
-
-    // 2. Live Firebase Authentication (if configured in .env)
-    if (isFirebaseConfigured && auth) {
-      try {
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
-        const token = await userCredential.user.getIdToken();
-        const formatted = formatUser({
-          ...userCredential.user,
-          role: 'admin',
-          token,
-        });
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(formatted));
-        return formatted;
-      } catch (error) {
-        throw new Error(getAuthErrorMessage(error));
-      }
-    }
-
-    // 3. Fallback development authentication for other emails
-    if (password.length >= 6) {
-      const devUser = {
-        uid: 'usr_' + Math.random().toString(36).substring(2, 9),
-        email,
-        displayName: email.split('@')[0],
-        role: 'admin',
-        token: 'mock_jwt_token_' + Date.now(),
-        createdAt: new Date().toISOString(),
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(devUser));
-      return devUser;
-    }
-
-    throw new Error('Password must be at least 6 characters.');
   },
 
   /**
@@ -92,26 +63,29 @@ export const authService = {
    */
   subscribeToAuthChanges(callback) {
     if (isFirebaseConfigured && auth) {
-      return onAuthStateChanged(auth, (firebaseUser) => {
+      return onAuthStateChanged(auth, async (firebaseUser) => {
         if (firebaseUser) {
-          callback(formatUser({ ...firebaseUser, role: 'admin' }));
-        } else {
-          // Check local storage before treating as unauthenticated
-          const stored = localStorage.getItem(STORAGE_KEY);
-          if (stored) {
-            try {
-              callback(JSON.parse(stored));
-            } catch {
-              callback(null);
-            }
-          } else {
+          try {
+            const token = await firebaseUser.getIdToken();
+            const formatted = formatUser({
+              ...firebaseUser,
+              role: 'admin',
+              token,
+            });
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(formatted));
+            callback(formatted);
+          } catch (err) {
+            console.error('[AuthService] Failed to retrieve fresh ID token:', err);
             callback(null);
           }
+        } else {
+          localStorage.removeItem(STORAGE_KEY);
+          callback(null);
         }
       });
     }
 
-    // If Firebase is not configured, load from localStorage
+    // If Firebase is not configured, load from localStorage if exists
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       try {
@@ -123,7 +97,6 @@ export const authService = {
       callback(null);
     }
 
-    // Return no-op unsubscribe function
     return () => {};
   },
 
@@ -139,3 +112,5 @@ export const authService = {
     }
   },
 };
+
+export default authService;

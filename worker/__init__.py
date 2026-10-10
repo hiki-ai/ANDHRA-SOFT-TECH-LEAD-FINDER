@@ -6,5 +6,5 @@ Phase 11-13 will implement:
 - Throttling & exponential backoff
 - Phone normalization
 - Deduplication pipeline
-- Batch upserts (500 records/batch) to PostgreSQL
+- Batch upserts (450 records/chunk) to Firebase Cloud Firestore
 """

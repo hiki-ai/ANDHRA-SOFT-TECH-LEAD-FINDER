@@ -1,0 +1,22 @@
+services:
+  # Flask REST API Web Service for Render
+  - type: web
+    name: ast-lead-finder-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn run:app
+    plan: starter
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: CORS_ORIGINS
+        value: "https://andhra-soft-tech-lead-finder.vercel.app,http://localhost:5173,http://localhost:3000"
+      - key: FIREBASE_PROJECT_ID
+        value: andhra-soft-tech-lead-finder
+      - key: ADMIN_EMAILS
+        value: "admin@andhrasofttech.com"
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false

@@ -44,11 +44,6 @@ export function Login() {
     }
   };
 
-  const fillDemoAdmin = () => {
-    setEmail('admin@andhrasofttech.com');
-    setPassword('admin123');
-    setError('');
-  };
 
   return (
     <div>
@@ -119,23 +114,16 @@ export function Login() {
         </Button>
       </form>
 
-      {/* Developer Demo Account Notice */}
+      {/* Security & Access Notice */}
       <div className="mt-6 pt-4 border-t border-surface-100 bg-surface-50 -mx-6 -mb-8 sm:-mx-10 sm:-mb-8 p-4 rounded-b-2xl">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5 text-[11px] text-surface-500">
-            <Info className="w-3.5 h-3.5 text-brand-600" />
-            <span>Dev Admin Preset:</span>
+        <div className="flex items-center justify-between text-xs text-surface-500">
+          <div className="flex items-center gap-1.5 text-[11px] text-surface-600">
+            <ShieldCheck className="w-3.5 h-3.5 text-brand-600" />
+            <span>Authorized Admin Access</span>
           </div>
-          <button
-            type="button"
-            onClick={fillDemoAdmin}
-            className="text-[11px] font-semibold text-brand-600 hover:text-brand-800 underline cursor-pointer"
-          >
-            Auto-fill Credentials
-          </button>
-        </div>
-        <div className="mt-1 font-mono text-[10px] text-surface-400">
-          admin@andhrasofttech.com / admin123
+          <span className="text-[10px] text-surface-400 font-mono">
+            Firebase Auth Protected
+          </span>
         </div>
       </div>
     </div>

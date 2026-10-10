@@ -1,25 +1,38 @@
 /**
- * Spreadsheet Import Service
+ * ==============================================================================
+ * ANDHRA SOFT TECH — LEAD FINDER
+ * REAL SPREADSHEET IMPORT SERVICE
+ * ==============================================================================
  * Location: frontend/src/services/importService.js
+ * ==============================================================================
  */
 
 import { apiClient } from './apiClient';
 
 export const importService = {
-  async uploadFile(file) {
+  /**
+   * Send file to backend to read headers, detect columns, and preview first rows
+   */
+  async previewFile(file) {
     const formData = new FormData();
     formData.append('file', file);
-    return apiClient.post('/imports', formData, {
+    const res = await apiClient.post('/imports/preview', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
+    return res?.data || res;
   },
 
-  async confirmImport(jobId, mapping) {
-    return apiClient.post(`/imports/${jobId}/confirm`, { mapping });
-  },
-
-  async getImportStatus(jobId) {
-    return apiClient.get(`/imports/${jobId}`);
+  /**
+   * Execute real import: upload spreadsheet along with user-selected column mapping
+   */
+  async executeImport(file, mapping) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('mapping', JSON.stringify(mapping || {}));
+    const res = await apiClient.post('/imports', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res?.data || res;
   },
 };
 

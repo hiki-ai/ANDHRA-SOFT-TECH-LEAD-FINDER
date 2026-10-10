@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   Layers,
@@ -14,6 +14,9 @@ import {
   Radio,
   FileSpreadsheet,
   Users,
+  RefreshCw,
+  AlertCircle,
+  ArrowLeft,
 } from 'lucide-react';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
@@ -21,46 +24,110 @@ import { ProgressBar } from '../components/common/ProgressBar';
 import { Breadcrumbs } from '../components/common/Breadcrumbs';
 import { formatNumber, formatPercent, formatDate } from '../utils/formatters';
 import { useToast } from '../context/ToastContext';
+import { collectionService } from '../services/collectionService';
+import { exportService } from '../services/exportService';
 
 export function CollectionDetails() {
   const { id } = useParams();
   const toast = useToast();
 
-  const [job, setJob] = useState({
-    id: id || 'col_88329',
-    category: 'Furniture & Interiors',
-    location: 'Rajahmundry, Andhra Pradesh',
-    target_count: 5000,
-    found: 4820,
-    valid: 4210,
-    duplicate: 410,
-    failed: 200,
-    progress: 96,
-    status: 'running',
-    source_name: 'Official Public Commercial Registry (Connector A)',
-    rate_limit: '60 req/min',
-    concurrency: 4,
-    started_at: '2026-10-04T10:45:00Z',
-    estimated_end: '2026-10-04T11:00:00Z',
-    error_summary: [
-      { code: 'PHONE_MISSING', count: 125, message: 'Vendor entry missing verifiable telephone number' },
-      { code: 'ADDRESS_MALFORMED', count: 75, message: 'Incomplete geographic address bounds' },
-    ],
-  });
+  const [job, setJob] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [exporting, setExporting] = useState(false);
 
-  const handlePauseToggle = () => {
-    if (job.status === 'running') {
-      setJob((prev) => ({ ...prev, status: 'paused' }));
-      toast.info('Collection job suspended.');
-    } else {
-      setJob((prev) => ({ ...prev, status: 'running' }));
-      toast.success('Collection job resumed.');
+  const fetchJob = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await collectionService.getCollectionById(id);
+      const data = res?.data || res;
+      if (data && data.id) {
+        setJob(data);
+      } else {
+        setError('Collection job not found.');
+      }
+    } catch (err) {
+      console.error('[CollectionDetails] Error fetching job:', err);
+      setError(err?.message || 'Collection job not found in Firestore.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleExport = () => {
-    toast.success(`Exporting ${formatNumber(job.valid)} valid leads from job ${job.id} to Excel.`);
+  useEffect(() => {
+    fetchJob();
+  }, [id]);
+
+  const handlePauseToggle = async () => {
+    if (!job?.id) return;
+    try {
+      if (job.status === 'running') {
+        await collectionService.pauseCollection(job.id);
+        setJob((prev) => ({ ...prev, status: 'paused' }));
+        toast.info('Collection job suspended.');
+      } else {
+        await collectionService.resumeCollection(job.id);
+        setJob((prev) => ({ ...prev, status: 'running' }));
+        toast.success('Collection job resumed.');
+      }
+    } catch (err) {
+      toast.error(err?.message || 'Failed to update job status.');
+    }
   };
+
+  const handleExport = async () => {
+    if (!job) return;
+    setExporting(true);
+    try {
+      toast.info(`Generating Excel export for ${job.category || 'leads'}...`);
+      await exportService.downloadDirectly({
+        category: job.category || undefined,
+        city: job.location || undefined,
+        format: 'xlsx',
+      });
+      toast.success('Excel export generated.');
+    } catch (err) {
+      toast.error(err?.message || 'Export failed.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="py-20 text-center">
+        <RefreshCw className="w-6 h-6 animate-spin text-brand-600 mx-auto mb-3" />
+        <p className="text-xs text-surface-500 font-medium">Loading collection telemetry from database...</p>
+      </div>
+    );
+  }
+
+  if (error || !job) {
+    return (
+      <div className="space-y-4">
+        <Breadcrumbs items={[{ label: 'Collections', to: '/collections' }, { label: 'Not Found' }]} />
+        <div className="bg-white p-8 rounded-2xl border border-surface-200 text-center space-y-4">
+          <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-600 mx-auto">
+            <AlertCircle className="w-6 h-6" />
+          </div>
+          <h2 className="text-base font-bold text-surface-900">Collection Not Found</h2>
+          <p className="text-xs text-surface-500 max-w-sm mx-auto">
+            {error || `The collection ID "${id}" does not exist in the database.`}
+          </p>
+          <div>
+            <Link to="/collections">
+              <Button variant="primary" size="sm" iconLeft={ArrowLeft}>
+                Back to Collections
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const yieldPct = (job.found || 0) > 0 ? (((job.valid || 0) / job.found) * 100).toFixed(1) : '0';
 
   return (
     <div className="space-y-6">
@@ -81,10 +148,10 @@ export function CollectionDetails() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-xl font-bold text-surface-900 tracking-tight">
-                {job.category} — {job.location}
+                {job.category || 'Vendor Extraction'} — {job.location || 'All AP'}
               </h1>
-              <Badge variant={job.status === 'running' ? 'running' : 'completed'} dot pulse={job.status === 'running'}>
-                {job.status.toUpperCase()}
+              <Badge variant={job.status || 'pending'} dot pulse={job.status === 'running'}>
+                {String(job.status || 'pending').toUpperCase()}
               </Badge>
             </div>
             <p className="text-xs text-surface-500 mt-1">
@@ -121,6 +188,7 @@ export function CollectionDetails() {
             variant="primary"
             size="sm"
             iconLeft={Download}
+            loading={exporting}
             onClick={handleExport}
           >
             Export to Excel
@@ -140,9 +208,9 @@ export function CollectionDetails() {
           <span className="text-[11px] font-semibold text-surface-500 uppercase tracking-wider block mb-1">
             Found Records
           </span>
-          <span className="text-2xl font-bold text-surface-900">{formatNumber(job.found)}</span>
+          <span className="text-2xl font-bold text-surface-900">{formatNumber(job.found || 0)}</span>
           <span className="text-xs text-surface-400 block mt-1">
-            Target: {formatNumber(job.target_count)}
+            Target: {formatNumber(job.target_count || 0)}
           </span>
         </div>
 
@@ -150,9 +218,9 @@ export function CollectionDetails() {
           <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider block mb-1">
             Valid Leads
           </span>
-          <span className="text-2xl font-bold text-emerald-800">{formatNumber(job.valid)}</span>
+          <span className="text-2xl font-bold text-emerald-800">{formatNumber(job.valid || 0)}</span>
           <span className="text-xs text-emerald-600 block mt-1">
-            {formatPercent((job.valid / job.found) * 100)} conversion
+            {yieldPct}% conversion
           </span>
         </div>
 
@@ -160,7 +228,7 @@ export function CollectionDetails() {
           <span className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider block mb-1">
             Duplicates
           </span>
-          <span className="text-2xl font-bold text-amber-800">{formatNumber(job.duplicate)}</span>
+          <span className="text-2xl font-bold text-amber-800">{formatNumber(job.duplicate || 0)}</span>
           <span className="text-xs text-amber-600 block mt-1">
             Auto-deduplicated
           </span>
@@ -170,7 +238,7 @@ export function CollectionDetails() {
           <span className="text-[11px] font-semibold text-rose-700 uppercase tracking-wider block mb-1">
             Validation Errors
           </span>
-          <span className="text-2xl font-bold text-rose-800">{formatNumber(job.failed)}</span>
+          <span className="text-2xl font-bold text-rose-800">{formatNumber(job.failed || 0)}</span>
           <span className="text-xs text-rose-600 block mt-1">
             Saved for review
           </span>
@@ -182,10 +250,10 @@ export function CollectionDetails() {
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-surface-200 shadow-card space-y-5">
           <h2 className="text-sm font-bold text-surface-900 uppercase tracking-wider pb-2 border-b border-surface-100 flex items-center justify-between">
             <span>Collection Pipeline Telemetry</span>
-            <span className="text-xs font-semibold text-brand-600">{job.progress}% Complete</span>
+            <span className="text-xs font-semibold text-brand-600">{job.progress || 0}% Complete</span>
           </h2>
 
-          <ProgressBar value={job.progress} size="lg" animated={job.status === 'running'} />
+          <ProgressBar value={job.progress || 0} size="lg" animated={job.status === 'running'} />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs pt-2">
             <div className="p-3 bg-surface-50 rounded-xl border border-surface-100">
@@ -193,16 +261,16 @@ export function CollectionDetails() {
                 Connected Source
               </span>
               <span className="font-medium text-surface-800 mt-1 block">
-                {job.source_name}
+                {job.source_name || 'Standard Directory Connector'}
               </span>
             </div>
 
             <div className="p-3 bg-surface-50 rounded-xl border border-surface-100">
               <span className="text-surface-400 font-semibold block uppercase text-[10px]">
-                Throttle & Concurrency
+                Concurrency & Throttle
               </span>
               <span className="font-medium text-surface-800 mt-1 block">
-                {job.rate_limit} • {job.concurrency} concurrent threads
+                {job.rate_limit || '60 req/min'} • {job.concurrency || 2} concurrent threads
               </span>
             </div>
           </div>
@@ -212,22 +280,28 @@ export function CollectionDetails() {
             <h3 className="text-xs font-bold text-surface-700 uppercase tracking-wider mb-2">
               Error / Rejection Breakdown
             </h3>
-            <div className="space-y-2">
-              {job.error_summary.map((err) => (
-                <div
-                  key={err.code}
-                  className="flex items-center justify-between p-3 rounded-xl bg-rose-50/50 border border-rose-100 text-xs"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-semibold text-rose-700 bg-rose-100 px-2 py-0.5 rounded">
-                      {err.code}
-                    </span>
-                    <span className="text-surface-700">{err.message}</span>
+            {job.error_summary && job.error_summary.length > 0 ? (
+              <div className="space-y-2">
+                {job.error_summary.map((err, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between p-3 rounded-xl bg-rose-50/50 border border-rose-100 text-xs"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-semibold text-rose-700 bg-rose-100 px-2 py-0.5 rounded">
+                        {err.code || 'VALIDATION_ERR'}
+                      </span>
+                      <span className="text-surface-700">{err.message}</span>
+                    </div>
+                    <span className="font-bold text-rose-800">{err.count} records</span>
                   </div>
-                  <span className="font-bold text-rose-800">{err.count} records</span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-4 bg-surface-50 rounded-xl border border-surface-100 text-xs text-surface-500 text-center">
+                No error reports recorded for this collection.
+              </div>
+            )}
           </div>
         </div>
 
@@ -269,3 +343,5 @@ export function CollectionDetails() {
     </div>
   );
 }
+
+export default CollectionDetails;

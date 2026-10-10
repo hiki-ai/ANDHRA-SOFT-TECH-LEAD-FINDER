@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Table,
   Plus,
@@ -16,6 +16,8 @@ import {
   ChevronDown,
   Layers,
   Sparkles,
+  RefreshCw,
+  FolderOpen,
 } from 'lucide-react';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
@@ -25,115 +27,56 @@ import { Badge } from '../components/common/Badge';
 import { ConfirmDialog } from '../components/common/ConfirmDialog';
 import { useToast } from '../context/ToastContext';
 import { cn } from '../utils/cn';
-
-// Sample spreadsheet dataset
-const INITIAL_SPREADSHEET_DATA = [
-  {
-    id: 'ven_1001',
-    business_name: 'Godavari Teak & Rosewood Emporium',
-    category: 'Furniture',
-    phone: '+91 883 245 8920',
-    email: 'info@godavariteak.com',
-    city: 'Rajahmundry',
-    state: 'Andhra Pradesh',
-    gst_number: '37AAAAA0000A1Z5',
-    rating: 4.8,
-    status: 'valid',
-    data_quality_score: 95,
-  },
-  {
-    id: 'ven_1002',
-    business_name: 'Visakha Multi-Speciality Dental Hospital',
-    category: 'Hospitals',
-    phone: '+91 891 254 7800',
-    email: 'contact@visakhadental.org',
-    city: 'Visakhapatnam',
-    state: 'Andhra Pradesh',
-    gst_number: '37BBBBB1111B2Z6',
-    rating: 4.6,
-    status: 'valid',
-    data_quality_score: 92,
-  },
-  {
-    id: 'ven_1003',
-    business_name: 'Krishna Delta Gourmet Restaurant',
-    category: 'Restaurants',
-    phone: '+91 866 248 1122',
-    email: 'manager@krishnagourmet.in',
-    city: 'Vijayawada',
-    state: 'Andhra Pradesh',
-    gst_number: '37CCCCC2222C3Z7',
-    rating: 4.4,
-    status: 'valid',
-    data_quality_score: 88,
-  },
-  {
-    id: 'ven_1004',
-    business_name: 'Amaravati Skyline Heights & Builders',
-    category: 'Real Estate',
-    phone: '+91 863 223 9901',
-    email: 'sales@amaravatiskyline.com',
-    city: 'Guntur',
-    state: 'Andhra Pradesh',
-    gst_number: '37DDDDD3333D4Z8',
-    rating: 4.2,
-    status: 'valid',
-    data_quality_score: 84,
-  },
-  {
-    id: 'ven_1005',
-    business_name: 'Konaseema Grand Heritage Residency',
-    category: 'Hotels',
-    phone: '+91 884 237 4455',
-    email: 'reservations@konaseemagrand.com',
-    city: 'Kakinada',
-    state: 'Andhra Pradesh',
-    gst_number: '37EEEEE4444E5Z9',
-    rating: 4.7,
-    status: 'valid',
-    data_quality_score: 90,
-  },
-  {
-    id: 'ven_1006',
-    business_name: 'Godavari Furnishing Works',
-    category: 'Furniture',
-    phone: '+91 883 245 8920',
-    email: '',
-    city: 'Rajahmundry',
-    state: 'Andhra Pradesh',
-    gst_number: '',
-    rating: 4.5,
-    status: 'duplicate',
-    data_quality_score: 62,
-  },
-  {
-    id: 'ven_1007',
-    business_name: 'Nellore Spice Kitchen',
-    category: 'Restaurants',
-    phone: '',
-    email: '',
-    city: 'Nellore',
-    state: 'Andhra Pradesh',
-    gst_number: '',
-    rating: 3.8,
-    status: 'invalid',
-    data_quality_score: 45,
-  },
-];
+import { vendorService } from '../services/vendorService';
+import { columnService } from '../services/columnService';
+import { exportService } from '../services/exportService';
 
 export function DataEditor() {
-  const [data, setData] = useState(INITIAL_SPREADSHEET_DATA);
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState(null);
+
   const [dirtyRows, setDirtyRows] = useState(new Set());
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddColumnModal, setShowAddColumnModal] = useState(false);
   const [newColumnName, setNewColumnName] = useState('');
   const [newColumnType, setNewColumnType] = useState('text');
-  const [customColumns, setCustomColumns] = useState([
-    { key: 'gst_number', label: 'GST Number', type: 'text' },
-  ]);
+  const [customColumns, setCustomColumns] = useState([]);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const toast = useToast();
+
+  const loadGridData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // 1. Fetch custom columns
+      const colsRes = await columnService.getColumns();
+      const loadedCols = colsRes?.data || colsRes || [];
+      if (Array.isArray(loadedCols)) {
+        setCustomColumns(loadedCols);
+      }
+
+      // 2. Fetch vendor records
+      const venRes = await vendorService.getVendors({ limit: 100 });
+      const venData = venRes?.data || venRes;
+      const items = venData?.items || [];
+      setData(items);
+      setDirtyRows(new Set());
+      setSelectedIds(new Set());
+    } catch (err) {
+      console.error('[DataEditor] Load error:', err);
+      setError(err?.message || 'Failed to load spreadsheet records from Firestore.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadGridData();
+  }, []);
 
   const handleCellChange = (id, field, value) => {
     setData((prev) =>
@@ -159,64 +102,119 @@ export function DataEditor() {
     });
   };
 
-  const handleSaveChanges = () => {
-    setDirtyRows(new Set());
-    toast.success(`Saved modifications for ${dirtyRows.size} record(s) to Firestore.`);
+  const handleSaveChanges = async () => {
+    if (dirtyRows.size === 0) return;
+    setSaving(true);
+    try {
+      const rowsToSave = data.filter((r) => dirtyRows.has(r.id));
+      for (const row of rowsToSave) {
+        if (row.isNew) {
+          const { isNew, ...payload } = row;
+          await vendorService.createVendor(payload);
+        } else {
+          await vendorService.updateVendor(row.id, row);
+        }
+      }
+      setDirtyRows(new Set());
+      toast.success(`Saved modifications for ${rowsToSave.length} record(s) to Cloud Firestore.`);
+    } catch (err) {
+      console.error('[DataEditor] Save changes error:', err);
+      toast.error(err?.message || 'Failed to persist edits to Firestore.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDiscardChanges = () => {
-    setData(INITIAL_SPREADSHEET_DATA);
-    setDirtyRows(new Set());
+    loadGridData();
     toast.info('Discarded unsaved spreadsheet edits.');
   };
 
   const handleAddRow = () => {
-    const newId = 'ven_' + Math.floor(1000 + Math.random() * 9000);
+    const tempId = 'new_' + Date.now();
     const newRow = {
-      id: newId,
+      id: tempId,
+      isNew: true,
       business_name: 'New Business Entry',
       category: 'General',
       phone: '',
       email: '',
       city: 'Rajahmundry',
       state: 'Andhra Pradesh',
-      gst_number: '',
       rating: 0,
-      status: 'pending_review',
+      status: 'valid',
       data_quality_score: 50,
     };
     setData([newRow, ...data]);
-    setDirtyRows((prev) => new Set(prev).add(newId));
+    setDirtyRows((prev) => new Set(prev).add(tempId));
     toast.info('New row appended to spreadsheet.');
   };
 
-  const handleDeleteSelected = () => {
-    setData((prev) => prev.filter((r) => !selectedIds.has(r.id)));
-    setSelectedIds(new Set());
-    setShowDeleteConfirm(false);
-    toast.success('Selected row(s) removed.');
+  const handleDeleteSelected = async () => {
+    const idsToDelete = Array.from(selectedIds);
+    try {
+      for (const id of idsToDelete) {
+        if (!id.startsWith('new_')) {
+          await vendorService.deleteVendor(id);
+        }
+      }
+      setData((prev) => prev.filter((r) => !selectedIds.has(r.id)));
+      setSelectedIds(new Set());
+      setShowDeleteConfirm(false);
+      toast.success(`Deleted ${idsToDelete.length} row(s) permanently.`);
+    } catch (err) {
+      console.error('[DataEditor] Delete error:', err);
+      toast.error(err?.message || 'Failed to delete selected rows.');
+    }
   };
 
-  const handleAddColumn = (e) => {
+  const handleAddColumn = async (e) => {
     e.preventDefault();
     if (!newColumnName.trim()) return;
-    const colKey = newColumnName.toLowerCase().replace(/\s+/g, '_');
-    setCustomColumns((prev) => [
-      ...prev,
-      { key: colKey, label: newColumnName.trim(), type: newColumnType },
-    ]);
-    setData((prev) => prev.map((r) => ({ ...r, [colKey]: '' })));
-    setNewColumnName('');
-    setShowAddColumnModal(false);
-    toast.success(`Custom column "${newColumnName}" added to grid.`);
+    const colKey = newColumnName.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+    try {
+      const res = await columnService.createColumn({
+        key: colKey,
+        label: newColumnName.trim(),
+        type: newColumnType,
+      });
+      const createdCol = res?.data || {
+        key: colKey,
+        label: newColumnName.trim(),
+        type: newColumnType,
+      };
+
+      setCustomColumns((prev) => [...prev, createdCol]);
+      setData((prev) => prev.map((r) => ({ ...r, [colKey]: '' })));
+      setNewColumnName('');
+      setShowAddColumnModal(false);
+      toast.success(`Custom column "${newColumnName}" registered in Firestore.`);
+    } catch (err) {
+      console.error('[DataEditor] Add column error:', err);
+      toast.error(err?.message || 'Failed to create column.');
+    }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      toast.info('Generating real Excel export from Cloud Firestore...');
+      await exportService.downloadDirectly({ format: 'xlsx' });
+      toast.success('Spreadsheet exported to Excel successfully.');
+    } catch (err) {
+      console.error('[DataEditor] Export error:', err);
+      toast.error(err?.message || 'Failed to export Excel.');
+    } finally {
+      setExporting(false);
+    }
   };
 
   const filteredData = data.filter(
     (row) =>
       !searchTerm ||
-      row.business_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      row.city.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      row.phone.includes(searchTerm)
+      (row.business_name && row.business_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (row.city && row.city.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (row.phone && row.phone.includes(searchTerm))
   );
 
   return (
@@ -228,10 +226,10 @@ export function DataEditor() {
             <h1 className="text-2xl font-bold tracking-tight text-surface-900">
               Spreadsheet Data Editor
             </h1>
-            <Badge variant="brand">Excel Grid Mode</Badge>
+            <Badge variant="brand">Cloud Grid Mode</Badge>
           </div>
           <p className="text-xs text-surface-500 mt-1">
-            Inline editable grid with server-side batching and custom column management.
+            Inline editable grid with server-side batching and dynamic Firestore columns.
           </p>
         </div>
 
@@ -251,6 +249,7 @@ export function DataEditor() {
                 variant="primary"
                 size="sm"
                 iconLeft={Save}
+                loading={saving}
                 onClick={handleSaveChanges}
               >
                 Save ({dirtyRows.size})
@@ -280,7 +279,8 @@ export function DataEditor() {
             variant="outline"
             size="sm"
             iconLeft={Download}
-            onClick={() => toast.success('Exporting edited spreadsheet dataset to Excel...')}
+            loading={exporting}
+            onClick={handleExport}
           >
             Export Excel
           </Button>
@@ -297,6 +297,19 @@ export function DataEditor() {
           )}
         </div>
       </div>
+
+      {/* Error Banner */}
+      {error && (
+        <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+            <p className="text-xs text-rose-800 font-medium">{error}</p>
+          </div>
+          <Button size="sm" variant="outline" onClick={loadGridData}>
+            Retry
+          </Button>
+        </div>
+      )}
 
       {/* Search and stats bar */}
       <div className="bg-white p-3 rounded-2xl border border-surface-200 shadow-card flex items-center justify-between gap-3 text-xs">
@@ -326,7 +339,7 @@ export function DataEditor() {
         </div>
       </div>
 
-      {/* Spreadsheet Table with Inline Editable Cells (Section 17) */}
+      {/* Spreadsheet Table with Inline Editable Cells */}
       <div className="bg-white rounded-2xl border border-surface-200 shadow-card overflow-hidden">
         <div className="overflow-x-auto max-h-[68vh]">
           <table className="w-full text-left border-collapse text-xs">
@@ -337,7 +350,7 @@ export function DataEditor() {
                     onClick={handleSelectAll}
                     className="text-surface-400 hover:text-surface-600"
                   >
-                    {selectedIds.size === data.length ? (
+                    {selectedIds.size === data.length && data.length > 0 ? (
                       <CheckSquare className="w-4 h-4 text-brand-600" />
                     ) : (
                       <Square className="w-4 h-4" />
@@ -364,7 +377,7 @@ export function DataEditor() {
                 </th>
                 {customColumns.map((col) => (
                   <th
-                    key={col.key}
+                    key={col.key || col.id}
                     className="py-2.5 px-3 border-r border-surface-200/60 min-w-[140px] text-brand-700 bg-brand-50/50"
                   >
                     {col.label}
@@ -379,145 +392,177 @@ export function DataEditor() {
               </tr>
             </thead>
             <tbody className="divide-y divide-surface-100">
-              {filteredData.map((row) => {
-                const isDirty = dirtyRows.has(row.id);
-                const isSelected = selectedIds.has(row.id);
-                const isDuplicate = row.status === 'duplicate';
-                const isInvalid = row.status === 'invalid';
+              {loading ? (
+                <tr>
+                  <td colSpan={9 + customColumns.length} className="py-12 text-center text-surface-400">
+                    <div className="flex items-center justify-center gap-2">
+                      <RefreshCw className="w-4 h-4 animate-spin text-brand-600" />
+                      <span>Loading spreadsheet records from Cloud Firestore...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : filteredData.length === 0 ? (
+                <tr>
+                  <td colSpan={9 + customColumns.length} className="py-16 text-center">
+                    <div className="max-w-sm mx-auto space-y-3">
+                      <div className="w-12 h-12 rounded-2xl bg-surface-100 border border-surface-200 mx-auto flex items-center justify-center text-surface-400">
+                        <FolderOpen className="w-6 h-6" />
+                      </div>
+                      <h3 className="text-sm font-bold text-surface-900">
+                        No Spreadsheet Records
+                      </h3>
+                      <p className="text-xs text-surface-500">
+                        No rows found in Firestore. Click "Add Row" or import a file to begin editing.
+                      </p>
+                      <div className="pt-2">
+                        <Button size="sm" variant="primary" iconLeft={Plus} onClick={handleAddRow}>
+                          Add Row
+                        </Button>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                filteredData.map((row) => {
+                  const isDirty = dirtyRows.has(row.id);
+                  const isSelected = selectedIds.has(row.id);
+                  const isDuplicate = row.status === 'duplicate';
+                  const isInvalid = row.status === 'invalid';
 
-                return (
-                  <tr
-                    key={row.id}
-                    className={cn(
-                      'transition-colors',
-                      isSelected ? 'bg-brand-50/40' : 'hover:bg-surface-50/60',
-                      isDuplicate && 'bg-amber-50/20',
-                      isInvalid && 'bg-rose-50/20'
-                    )}
-                  >
-                    {/* Checkbox */}
-                    <td className="py-2 px-3 text-center">
-                      <button
-                        onClick={() => handleToggleRow(row.id)}
-                        className="text-surface-400 hover:text-surface-600"
-                      >
-                        {isSelected ? (
-                          <CheckSquare className="w-4 h-4 text-brand-600" />
-                        ) : (
-                          <Square className="w-4 h-4" />
-                        )}
-                      </button>
-                    </td>
+                  return (
+                    <tr
+                      key={row.id}
+                      className={cn(
+                        'transition-colors',
+                        isSelected ? 'bg-brand-50/40' : 'hover:bg-surface-50/60',
+                        isDuplicate && 'bg-amber-50/20',
+                        isInvalid && 'bg-rose-50/20'
+                      )}
+                    >
+                      {/* Checkbox */}
+                      <td className="py-2 px-3 text-center">
+                        <button
+                          onClick={() => handleToggleRow(row.id)}
+                          className="text-surface-400 hover:text-surface-600"
+                        >
+                          {isSelected ? (
+                            <CheckSquare className="w-4 h-4 text-brand-600" />
+                          ) : (
+                            <Square className="w-4 h-4" />
+                          )}
+                        </button>
+                      </td>
 
-                    {/* Business Name (Editable Cell) */}
-                    <td className="p-1 border-r border-surface-100">
-                      <input
-                        type="text"
-                        value={row.business_name}
-                        onChange={(e) =>
-                          handleCellChange(row.id, 'business_name', e.target.value)
-                        }
-                        className={cn(
-                          'w-full px-2 py-1 bg-transparent rounded border border-transparent hover:border-surface-200 focus:bg-white focus:border-brand-500 focus:outline-none font-medium',
-                          isDirty && 'font-semibold text-brand-900'
-                        )}
-                      />
-                    </td>
-
-                    {/* Category */}
-                    <td className="p-1 border-r border-surface-100">
-                      <input
-                        type="text"
-                        value={row.category}
-                        onChange={(e) =>
-                          handleCellChange(row.id, 'category', e.target.value)
-                        }
-                        className="w-full px-2 py-1 bg-transparent rounded border border-transparent hover:border-surface-200 focus:bg-white focus:border-brand-500 focus:outline-none"
-                      />
-                    </td>
-
-                    {/* Phone */}
-                    <td className="p-1 border-r border-surface-100 font-mono">
-                      <input
-                        type="text"
-                        value={row.phone}
-                        onChange={(e) =>
-                          handleCellChange(row.id, 'phone', e.target.value)
-                        }
-                        className={cn(
-                          'w-full px-2 py-1 bg-transparent rounded border border-transparent hover:border-surface-200 focus:bg-white focus:border-brand-500 focus:outline-none',
-                          !row.phone && 'bg-rose-50/50 placeholder:italic'
-                        )}
-                        placeholder="Add phone..."
-                      />
-                    </td>
-
-                    {/* Email */}
-                    <td className="p-1 border-r border-surface-100">
-                      <input
-                        type="email"
-                        value={row.email}
-                        onChange={(e) =>
-                          handleCellChange(row.id, 'email', e.target.value)
-                        }
-                        className="w-full px-2 py-1 bg-transparent rounded border border-transparent hover:border-surface-200 focus:bg-white focus:border-brand-500 focus:outline-none"
-                        placeholder="Add email..."
-                      />
-                    </td>
-
-                    {/* City */}
-                    <td className="p-1 border-r border-surface-100">
-                      <input
-                        type="text"
-                        value={row.city}
-                        onChange={(e) =>
-                          handleCellChange(row.id, 'city', e.target.value)
-                        }
-                        className="w-full px-2 py-1 bg-transparent rounded border border-transparent hover:border-surface-200 focus:bg-white focus:border-brand-500 focus:outline-none"
-                      />
-                    </td>
-
-                    {/* State */}
-                    <td className="p-1 border-r border-surface-100">
-                      <input
-                        type="text"
-                        value={row.state}
-                        onChange={(e) =>
-                          handleCellChange(row.id, 'state', e.target.value)
-                        }
-                        className="w-full px-2 py-1 bg-transparent rounded border border-transparent hover:border-surface-200 focus:bg-white focus:border-brand-500 focus:outline-none"
-                      />
-                    </td>
-
-                    {/* Custom columns */}
-                    {customColumns.map((col) => (
-                      <td key={col.key} className="p-1 border-r border-surface-100">
+                      {/* Business Name (Editable Cell) */}
+                      <td className="p-1 border-r border-surface-100">
                         <input
                           type="text"
-                          value={row[col.key] || ''}
+                          value={row.business_name || ''}
                           onChange={(e) =>
-                            handleCellChange(row.id, col.key, e.target.value)
+                            handleCellChange(row.id, 'business_name', e.target.value)
                           }
-                          className="w-full px-2 py-1 bg-transparent rounded border border-transparent hover:border-surface-200 focus:bg-white focus:border-brand-500 focus:outline-none"
-                          placeholder={`Enter ${col.label.toLowerCase()}...`}
+                          className={cn(
+                            'w-full px-2 py-1 bg-transparent rounded border border-transparent hover:border-surface-200 focus:bg-white focus:border-brand-500 focus:outline-none font-medium',
+                            isDirty && 'font-semibold text-brand-900'
+                          )}
                         />
                       </td>
-                    ))}
 
-                    {/* Status Pill */}
-                    <td className="py-2 px-3 border-r border-surface-100">
-                      <Badge variant={row.status} dot>
-                        {row.status.toUpperCase()}
-                      </Badge>
-                    </td>
+                      {/* Category */}
+                      <td className="p-1 border-r border-surface-100">
+                        <input
+                          type="text"
+                          value={row.category || ''}
+                          onChange={(e) =>
+                            handleCellChange(row.id, 'category', e.target.value)
+                          }
+                          className="w-full px-2 py-1 bg-transparent rounded border border-transparent hover:border-surface-200 focus:bg-white focus:border-brand-500 focus:outline-none"
+                        />
+                      </td>
 
-                    {/* Quality */}
-                    <td className="py-2 px-3 text-center font-bold text-surface-700">
-                      {row.data_quality_score}%
-                    </td>
-                  </tr>
-                );
-              })}
+                      {/* Phone */}
+                      <td className="p-1 border-r border-surface-100 font-mono">
+                        <input
+                          type="text"
+                          value={row.phone || ''}
+                          onChange={(e) =>
+                            handleCellChange(row.id, 'phone', e.target.value)
+                          }
+                          className={cn(
+                            'w-full px-2 py-1 bg-transparent rounded border border-transparent hover:border-surface-200 focus:bg-white focus:border-brand-500 focus:outline-none',
+                            !row.phone && 'bg-rose-50/50 placeholder:italic'
+                          )}
+                          placeholder="Add phone..."
+                        />
+                      </td>
+
+                      {/* Email */}
+                      <td className="p-1 border-r border-surface-100">
+                        <input
+                          type="email"
+                          value={row.email || ''}
+                          onChange={(e) =>
+                            handleCellChange(row.id, 'email', e.target.value)
+                          }
+                          className="w-full px-2 py-1 bg-transparent rounded border border-transparent hover:border-surface-200 focus:bg-white focus:border-brand-500 focus:outline-none"
+                          placeholder="Add email..."
+                        />
+                      </td>
+
+                      {/* City */}
+                      <td className="p-1 border-r border-surface-100">
+                        <input
+                          type="text"
+                          value={row.city || ''}
+                          onChange={(e) =>
+                            handleCellChange(row.id, 'city', e.target.value)
+                          }
+                          className="w-full px-2 py-1 bg-transparent rounded border border-transparent hover:border-surface-200 focus:bg-white focus:border-brand-500 focus:outline-none"
+                        />
+                      </td>
+
+                      {/* State */}
+                      <td className="p-1 border-r border-surface-100">
+                        <input
+                          type="text"
+                          value={row.state || 'Andhra Pradesh'}
+                          onChange={(e) =>
+                            handleCellChange(row.id, 'state', e.target.value)
+                          }
+                          className="w-full px-2 py-1 bg-transparent rounded border border-transparent hover:border-surface-200 focus:bg-white focus:border-brand-500 focus:outline-none"
+                        />
+                      </td>
+
+                      {/* Custom columns */}
+                      {customColumns.map((col) => (
+                        <td key={col.key || col.id} className="p-1 border-r border-surface-100">
+                          <input
+                            type="text"
+                            value={row[col.key] || ''}
+                            onChange={(e) =>
+                              handleCellChange(row.id, col.key, e.target.value)
+                            }
+                            className="w-full px-2 py-1 bg-transparent rounded border border-transparent hover:border-surface-200 focus:bg-white focus:border-brand-500 focus:outline-none"
+                            placeholder={`Enter ${col.label.toLowerCase()}...`}
+                          />
+                        </td>
+                      ))}
+
+                      {/* Status Pill */}
+                      <td className="py-2 px-3 border-r border-surface-100">
+                        <Badge variant={row.status || 'valid'} dot>
+                          {String(row.status || 'valid').toUpperCase()}
+                        </Badge>
+                      </td>
+
+                      {/* Quality */}
+                      <td className="py-2 px-3 text-center font-bold text-surface-700">
+                        {row.data_quality_score ?? 0}%
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -534,11 +579,11 @@ export function DataEditor() {
               <span>Invalid Field Highlight</span>
             </span>
           </div>
-          <span>Changes are batched and synced directly to Firestore upon Save.</span>
+          <span>Edits are persisted directly to Cloud Firestore upon clicking Save.</span>
         </div>
       </div>
 
-      {/* Add Custom Column Modal (Section 16) */}
+      {/* Add Custom Column Modal */}
       <Modal
         isOpen={showAddColumnModal}
         onClose={() => setShowAddColumnModal(false)}
@@ -589,10 +634,12 @@ export function DataEditor() {
         onClose={() => setShowDeleteConfirm(false)}
         onConfirm={handleDeleteSelected}
         title="Delete Selected Spreadsheet Rows"
-        message={`Are you sure you want to delete ${selectedIds.size} row(s)? This will stage them for removal.`}
+        message={`Are you sure you want to delete ${selectedIds.size} row(s)? This will delete them permanently from the database.`}
         confirmText="Delete Rows"
         isDanger={true}
       />
     </div>
   );
 }
+
+export default DataEditor;

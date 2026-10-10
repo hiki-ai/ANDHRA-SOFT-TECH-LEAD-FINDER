@@ -28,19 +28,19 @@ export function CollectionProgressCard({
   if (!job) return null;
 
   const {
-    id = 'col_demo_01',
-    category = 'Furniture',
-    location = 'Rajahmundry',
-    target_count = 5000,
-    found = 4820,
-    valid = 4210,
-    duplicate = 410,
-    failed = 200,
-    progress = 96,
-    status = 'running',
-    current_source = 'Public Directory Connector (Source A)',
-    elapsed_time = '12m 45s',
-    estimated_remaining = '1m 20s',
+    id = '',
+    category = 'General',
+    location = 'N/A',
+    target_count = 0,
+    found = 0,
+    valid = 0,
+    duplicate = 0,
+    failed = 0,
+    progress = 0,
+    status = 'pending',
+    current_source = 'Public Directory Connector',
+    elapsed_time = '0s',
+    estimated_remaining = '--',
   } = job;
 
   const statusVariantMap = {

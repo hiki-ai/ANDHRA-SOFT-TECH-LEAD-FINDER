@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useOutletContext } from 'react-router-dom';
 import {
   Layers,
@@ -11,6 +11,9 @@ import {
   AlertTriangle,
   Radio,
   Download,
+  RefreshCw,
+  AlertCircle,
+  FolderOpen,
 } from 'lucide-react';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
@@ -18,79 +21,7 @@ import { Input } from '../components/common/Input';
 import { Select } from '../components/common/Select';
 import { ProgressBar } from '../components/common/ProgressBar';
 import { formatNumber, formatDate } from '../utils/formatters';
-
-const DEMO_COLLECTIONS = [
-  {
-    id: 'col_88329',
-    category: 'Furniture & Interiors',
-    location: 'Rajahmundry, AP',
-    target_count: 5000,
-    found: 4820,
-    valid: 4210,
-    duplicate: 410,
-    failed: 200,
-    progress: 96,
-    status: 'running',
-    started_at: '2026-10-04T10:45:00Z',
-    completed_at: null,
-  },
-  {
-    id: 'col_72014',
-    category: 'Hospitals & Healthcare',
-    location: 'Visakhapatnam, AP',
-    target_count: 2000,
-    found: 2000,
-    valid: 1890,
-    duplicate: 85,
-    failed: 25,
-    progress: 100,
-    status: 'completed',
-    started_at: '2026-10-03T08:30:00Z',
-    completed_at: '2026-10-03T09:12:00Z',
-  },
-  {
-    id: 'col_61902',
-    category: 'Restaurants & Hospitality',
-    location: 'Vijayawada, AP',
-    target_count: 3500,
-    found: 3500,
-    valid: 3120,
-    duplicate: 290,
-    failed: 90,
-    progress: 100,
-    status: 'completed',
-    started_at: '2026-10-02T14:00:00Z',
-    completed_at: '2026-10-02T15:20:00Z',
-  },
-  {
-    id: 'col_54091',
-    category: 'Real Estate & Builders',
-    location: 'Guntur, AP',
-    target_count: 1500,
-    found: 1500,
-    valid: 1380,
-    duplicate: 95,
-    failed: 25,
-    progress: 100,
-    status: 'completed',
-    started_at: '2026-10-01T11:15:00Z',
-    completed_at: '2026-10-01T12:05:00Z',
-  },
-  {
-    id: 'col_49821',
-    category: 'Schools & Educational Institutes',
-    location: 'Kakinada, AP',
-    target_count: 1000,
-    found: 850,
-    valid: 780,
-    duplicate: 50,
-    failed: 20,
-    progress: 85,
-    status: 'paused',
-    started_at: '2026-09-30T16:00:00Z',
-    completed_at: null,
-  },
-];
+import { collectionService } from '../services/collectionService';
 
 const statusVariantMap = {
   running: 'running',
@@ -102,17 +33,40 @@ const statusVariantMap = {
 };
 
 export function Collections() {
+  const [collections, setCollections] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const { onOpenNewJob } = useOutletContext() || {};
   const navigate = useNavigate();
 
-  const filtered = DEMO_COLLECTIONS.filter((col) => {
+  const loadCollections = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await collectionService.getCollections();
+      const data = res?.data || res;
+      setCollections(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('[Collections] Load error:', err);
+      setError(err?.message || 'Failed to retrieve collections from the backend API.');
+      setCollections([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadCollections();
+  }, []);
+
+  const filtered = collections.filter((col) => {
     const matchesSearch =
       !searchTerm ||
-      col.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      col.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      col.id.toLowerCase().includes(searchTerm.toLowerCase());
+      (col.category && col.category.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (col.location && col.location.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (col.id && col.id.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesStatus = !statusFilter || col.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -126,18 +80,29 @@ export function Collections() {
             Collection History
           </h1>
           <p className="text-xs text-surface-500 mt-1">
-            Asynchronous vendor batch collection jobs and crawler telemetry.
+            Asynchronous vendor batch collection jobs and crawler telemetry stored in Firestore.
           </p>
         </div>
 
-        <Button
-          variant="primary"
-          size="sm"
-          iconLeft={Plus}
-          onClick={onOpenNewJob}
-        >
-          New Collection Job
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            iconLeft={RefreshCw}
+            loading={loading}
+            onClick={loadCollections}
+          >
+            Refresh
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            iconLeft={Plus}
+            onClick={onOpenNewJob}
+          >
+            New Collection Job
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -159,13 +124,28 @@ export function Collections() {
               { value: 'running', label: 'Running' },
               { value: 'completed', label: 'Completed' },
               { value: 'paused', label: 'Paused' },
+              { value: 'pending', label: 'Pending' },
               { value: 'failed', label: 'Failed' },
+              { value: 'cancelled', label: 'Cancelled' },
             ]}
           />
         </div>
       </div>
 
-      {/* Collections Table (Section 25) */}
+      {/* Error state */}
+      {error && (
+        <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+            <p className="text-xs text-rose-800 font-medium">{error}</p>
+          </div>
+          <Button size="sm" variant="outline" onClick={loadCollections}>
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {/* Collections Table */}
       <div className="bg-white rounded-2xl border border-surface-200 shadow-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[950px]">
@@ -184,65 +164,99 @@ export function Collections() {
               </tr>
             </thead>
             <tbody className="divide-y divide-surface-100 text-xs">
-              {filtered.map((col) => (
-                <tr
-                  key={col.id}
-                  onClick={() => navigate(`/collections/${col.id}`)}
-                  className="table-row-hover transition-colors cursor-pointer group"
-                >
-                  <td className="py-3.5 px-4 font-mono font-medium text-surface-800">
-                    {col.id}
-                  </td>
-                  <td className="py-3.5 px-4 font-semibold text-surface-900">
-                    {col.category}
-                  </td>
-                  <td className="py-3.5 px-4 text-surface-600">
-                    {col.location}
-                  </td>
-                  <td className="py-3.5 px-4 w-32 text-center">
-                    <div className="flex items-center gap-2">
-                      <ProgressBar
-                        value={col.progress}
-                        size="sm"
-                        color={col.status === 'completed' ? 'emerald' : 'brand'}
-                      />
-                      <span className="font-semibold text-[11px] w-8">{col.progress}%</span>
+              {loading ? (
+                <tr>
+                  <td colSpan={10} className="py-12 text-center text-surface-400">
+                    <div className="flex items-center justify-center gap-2">
+                      <RefreshCw className="w-4 h-4 animate-spin text-brand-600" />
+                      <span>Loading collection jobs from database...</span>
                     </div>
                   </td>
-                  <td className="py-3.5 px-4 text-surface-700">
-                    <span className="font-bold text-surface-900">{formatNumber(col.found)}</span>
-                    <span className="text-surface-400"> / {formatNumber(col.target_count)}</span>
-                  </td>
-                  <td className="py-3.5 px-4 font-bold text-emerald-700">
-                    {formatNumber(col.valid)}
-                  </td>
-                  <td className="py-3.5 px-4 text-amber-700 font-medium">
-                    {formatNumber(col.duplicate)}
-                  </td>
-                  <td className="py-3.5 px-4">
-                    <Badge
-                      variant={statusVariantMap[col.status] || 'neutral'}
-                      dot
-                      pulse={col.status === 'running'}
-                    >
-                      {col.status.toUpperCase()}
-                    </Badge>
-                  </td>
-                  <td className="py-3.5 px-4 text-surface-500">
-                    {formatDate(col.started_at)}
-                  </td>
-                  <td className="py-3.5 px-4 text-right">
-                    <Link
-                      to={`/collections/${col.id}`}
-                      onClick={(e) => e.stopPropagation()}
-                      className="inline-flex items-center gap-1 text-brand-600 hover:text-brand-800 font-semibold group-hover:underline"
-                    >
-                      <span>Details</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </Link>
+                </tr>
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="py-16 text-center">
+                    <div className="max-w-sm mx-auto space-y-3">
+                      <div className="w-12 h-12 rounded-2xl bg-surface-100 border border-surface-200 mx-auto flex items-center justify-center text-surface-400">
+                        <FolderOpen className="w-6 h-6" />
+                      </div>
+                      <h3 className="text-sm font-bold text-surface-900">
+                        No Collection Jobs Found
+                      </h3>
+                      <p className="text-xs text-surface-500">
+                        {searchTerm || statusFilter
+                          ? 'No collections match the specified filter criteria.'
+                          : 'No extraction jobs have been executed yet.'}
+                      </p>
+                      <div className="pt-2">
+                        <Button size="sm" variant="primary" iconLeft={Plus} onClick={onOpenNewJob}>
+                          Start New Collection
+                        </Button>
+                      </div>
+                    </div>
                   </td>
                 </tr>
-              ))}
+              ) : (
+                filtered.map((col) => (
+                  <tr
+                    key={col.id}
+                    onClick={() => navigate(`/collections/${col.id}`)}
+                    className="table-row-hover transition-colors cursor-pointer group"
+                  >
+                    <td className="py-3.5 px-4 font-mono font-medium text-surface-800">
+                      {col.id}
+                    </td>
+                    <td className="py-3.5 px-4 font-semibold text-surface-900">
+                      {col.category}
+                    </td>
+                    <td className="py-3.5 px-4 text-surface-600">
+                      {col.location}
+                    </td>
+                    <td className="py-3.5 px-4 w-32 text-center">
+                      <div className="flex items-center gap-2">
+                        <ProgressBar
+                          value={col.progress || 0}
+                          size="sm"
+                          color={col.status === 'completed' ? 'emerald' : 'brand'}
+                        />
+                        <span className="font-semibold text-[11px] w-8">{col.progress || 0}%</span>
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-4 text-surface-700">
+                      <span className="font-bold text-surface-900">{formatNumber(col.found || 0)}</span>
+                      <span className="text-surface-400"> / {formatNumber(col.target_count || 0)}</span>
+                    </td>
+                    <td className="py-3.5 px-4 font-bold text-emerald-700">
+                      {formatNumber(col.valid || 0)}
+                    </td>
+                    <td className="py-3.5 px-4 text-amber-700 font-medium">
+                      {formatNumber(col.duplicate || 0)}
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <Badge
+                        variant={statusVariantMap[col.status] || 'neutral'}
+                        dot
+                        pulse={col.status === 'running'}
+                      >
+                        {String(col.status || 'pending').toUpperCase()}
+                      </Badge>
+                    </td>
+                    <td className="py-3.5 px-4 text-surface-500">
+                      {formatDate(col.started_at)}
+                    </td>
+                    <td className="py-3.5 px-4 text-right">
+                      <Link
+                        to={`/collections/${col.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 text-brand-600 hover:text-brand-800 font-semibold group-hover:underline"
+                      >
+                        <span>Details</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </Link>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -250,3 +264,5 @@ export function Collections() {
     </div>
   );
 }
+
+export default Collections;
