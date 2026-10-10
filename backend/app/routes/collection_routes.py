@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, jsonify, request
 from ..middleware.firebase_auth import require_auth
 from ..config.firebase import get_firestore_db
+from ..config.settings import Settings
 
 collection_bp = Blueprint('collections', __name__, url_prefix='/api/v1/collections')
 
@@ -77,6 +78,25 @@ def create_collection():
     }
 
     db.collection('collections').document(job_id).set(job_doc)
+
+    # Dispatch to internal worker service if WORKER_URL binding is configured
+    if Settings.WORKER_URL:
+        try:
+            import requests
+            from urllib.parse import urljoin
+            worker_endpoint = urljoin(Settings.WORKER_URL.rstrip('/') + '/', 'jobs')
+            requests.post(
+                worker_endpoint,
+                json={
+                    "job_id": job_id,
+                    "category": category,
+                    "location": location,
+                    "target_count": target_count,
+                },
+                timeout=5
+            )
+        except Exception as e:
+            print(f"[CollectionRoutes] Notice: Worker dispatch over binding failed ({Settings.WORKER_URL}): {e}")
 
     return jsonify({
         "success": True,

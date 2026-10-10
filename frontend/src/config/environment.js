@@ -7,7 +7,7 @@ export const env = {
   isDev: import.meta.env.DEV,
   isProd: import.meta.env.PROD,
   mode: import.meta.env.MODE,
-  apiUrl: import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1',
+  apiUrl: import.meta.env.VITE_API_URL || '/api/v1',
   appName: 'ANDHRA SOFT TECH — Lead Finder',
   firebase: {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',

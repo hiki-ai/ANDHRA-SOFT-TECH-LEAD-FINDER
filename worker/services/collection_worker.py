@@ -1,9 +1,16 @@
 import time
-from ..collectors.source_manager import SourceManager
-from ..processors.normalizer import RecordNormalizer
-from ..processors.validator import RecordValidator
-from ..processors.deduplicator import RecordDeduplicator
-from .progress_service import ProgressService
+try:
+    from collectors.source_manager import SourceManager
+    from processors.normalizer import RecordNormalizer
+    from processors.validator import RecordValidator
+    from processors.deduplicator import RecordDeduplicator
+    from services.progress_service import ProgressService
+except (ImportError, ValueError):
+    from ..collectors.source_manager import SourceManager
+    from ..processors.normalizer import RecordNormalizer
+    from ..processors.validator import RecordValidator
+    from ..processors.deduplicator import RecordDeduplicator
+    from .progress_service import ProgressService
 
 class CollectionWorker:
     def __init__(self):

@@ -17,3 +17,6 @@ class Settings:
 
     # CORS
     CORS_ORIGINS = [origin.strip() for origin in os.getenv('CORS_ORIGINS', 'http://localhost:5173,http://localhost:3000').split(',')]
+
+    # Internal Service Bindings (injected by Vercel)
+    WORKER_URL = os.getenv('WORKER_URL', '')
