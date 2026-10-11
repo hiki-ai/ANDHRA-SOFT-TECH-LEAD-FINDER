@@ -22,7 +22,16 @@ apiClient.interceptors.request.use(
       }
     }
 
-    // 2. Attach freshest Firebase Auth ID token
+    // 2. Wait for Firebase Auth state to be ready if available
+    try {
+      if (auth && typeof auth.authStateReady === 'function') {
+        await auth.authStateReady();
+      }
+    } catch {
+      // Continue if authStateReady is not supported or errors
+    }
+
+    // 3. Attach freshest Firebase Auth ID token
     try {
       let token = null;
 
@@ -30,12 +39,23 @@ apiClient.interceptors.request.use(
       if (auth && auth.currentUser) {
         try {
           token = await auth.currentUser.getIdToken();
+          // Keep localStorage cached session in sync with fresh token
+          const stored = localStorage.getItem('ast_lead_finder_user');
+          if (stored) {
+            try {
+              const userObj = JSON.parse(stored);
+              userObj.token = token;
+              localStorage.setItem('ast_lead_finder_user', JSON.stringify(userObj));
+            } catch {
+              // ignore parse errors
+            }
+          }
         } catch (tokenErr) {
-          console.warn('[ApiClient] Failed to refresh Firebase token from currentUser:', tokenErr);
+          console.warn('[ApiClient] Failed to retrieve fresh token from currentUser:', tokenErr);
         }
       }
 
-      // Fallback to cached token in localStorage
+      // Fallback to cached token in localStorage if currentUser is not yet available
       if (!token) {
         const stored = localStorage.getItem('ast_lead_finder_user');
         if (stored) {
@@ -45,6 +65,7 @@ apiClient.interceptors.request.use(
       }
 
       if (token) {
+        config.headers = config.headers || {};
         config.headers.Authorization = `Bearer ${token}`;
       }
     } catch {
@@ -56,14 +77,43 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor for unified, transparent error formatting
+// Response interceptor for unified error formatting and transparent 401 token refresh retry
 apiClient.interceptors.response.use(
   (response) => response.data,
-  (error) => {
+  async (error) => {
+    const originalRequest = error.config;
+    const status = error.response?.status;
+
+    // Auto-retry once on 401 if user is logged into Firebase
+    if (status === 401 && originalRequest && !originalRequest._retry && auth && auth.currentUser) {
+      originalRequest._retry = true;
+      try {
+        const freshToken = await auth.currentUser.getIdToken(true);
+        if (freshToken) {
+          originalRequest.headers = originalRequest.headers || {};
+          originalRequest.headers.Authorization = `Bearer ${freshToken}`;
+
+          const stored = localStorage.getItem('ast_lead_finder_user');
+          if (stored) {
+            try {
+              const userObj = JSON.parse(stored);
+              userObj.token = freshToken;
+              localStorage.setItem('ast_lead_finder_user', JSON.stringify(userObj));
+            } catch {
+              // ignore
+            }
+          }
+
+          return apiClient(originalRequest);
+        }
+      } catch (retryErr) {
+        console.warn('[ApiClient] 401 token refresh retry failed:', retryErr);
+      }
+    }
+
     // Extract structured error from backend API JSON response if available
     const serverError = error.response?.data?.error;
     const serverMessage = typeof serverError === 'object' ? serverError.message : serverError;
-    const status = error.response?.status;
 
     let friendlyMessage = serverMessage || error.response?.data?.message || error.message || 'Network request failed';
 

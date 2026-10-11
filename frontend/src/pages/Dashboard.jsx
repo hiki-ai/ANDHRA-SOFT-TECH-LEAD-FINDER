@@ -26,12 +26,14 @@ import { CollectionProgressCard } from '../components/dashboard/CollectionProgre
 import { RecentCollectionsTable } from '../components/dashboard/RecentCollectionsTable';
 import { formatNumber, formatPercent } from '../utils/formatters';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../hooks/useAuth';
 import { dashboardService } from '../services/dashboardService';
 import { collectionService } from '../services/collectionService';
 
 export function Dashboard() {
   const { onOpenNewJob } = useOutletContext() || {};
   const toast = useToast();
+  const { loading: authLoading, isAuthenticated } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -69,8 +71,8 @@ export function Dashboard() {
           active_jobs: data.active_jobs || 0,
           active_job: data.active_job || null,
           recent_collections: data.recent_collections || [],
-          categories: data.categories || [],
-          cities: data.cities || [],
+          categories: data.categories || data.categories_distribution || [],
+          cities: data.cities || data.cities_distribution || [],
           quality_distribution: data.quality_distribution || { high: 0, medium: 0, low: 0 },
           is_live_firestore: Boolean(data.is_live_firestore),
         });
@@ -78,7 +80,10 @@ export function Dashboard() {
       }
     } catch (err) {
       console.error('[Dashboard] Error fetching telemetry:', err);
-      setError(err?.message || 'Failed to load live database telemetry. Please ensure the backend API is running.');
+      const friendlyMsg = err?.status === 401
+        ? 'Session expired or unauthorized. Please re-authenticate as an administrator.'
+        : (err?.message || 'Failed to load live database telemetry. Please ensure the backend API is running.');
+      setError(friendlyMsg);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -86,6 +91,10 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
+    // Wait until Firebase Auth restores session before making protected requests
+    if (authLoading) return;
+    if (!isAuthenticated) return;
+
     fetchStats();
     // Auto-refresh stats periodically only when backend is healthy to avoid hammering an unavailable backend
     const timer = setInterval(() => {
@@ -94,7 +103,7 @@ export function Dashboard() {
       }
     }, 15000);
     return () => clearInterval(timer);
-  }, [fetchStats, error]);
+  }, [fetchStats, authLoading, isAuthenticated, error]);
 
   const handlePause = async () => {
     if (!stats.active_job?.id) return;
@@ -133,11 +142,15 @@ export function Dashboard() {
   const highQualityPct = total > 0 ? ((stats.quality_distribution.high / total) * 100).toFixed(1) : 0;
   const medQualityPct = total > 0 ? ((stats.quality_distribution.medium / total) * 100).toFixed(1) : 0;
   const lowQualityPct = total > 0 ? ((stats.quality_distribution.low / total) * 100).toFixed(1) : 0;
+  const validPct = total > 0 ? `${((stats.valid_vendors / total) * 100).toFixed(1)}%` : '0%';
 
-  if (loading && !refreshing && !error) {
+  if (authLoading || (loading && !refreshing && !error)) {
     return (
       <div className="min-h-[400px] flex items-center justify-center">
-        <Loader size="lg" text="Connecting to backend and aggregating real-time Firestore telemetry..." />
+        <Loader
+          size="lg"
+          text={authLoading ? "Verifying administrative session authorization..." : "Connecting to backend and aggregating real-time Firestore telemetry..."}
+        />
       </div>
     );
   }
