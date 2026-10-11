@@ -52,7 +52,12 @@ def get_dashboard_stats():
             else:
                 invalid_vendors += 1
 
-            q_score = int(data.get('data_quality_score', 0))
+            raw_score = data.get('data_quality_score')
+            try:
+                q_score = int(float(raw_score)) if raw_score is not None else 0
+            except (ValueError, TypeError):
+                q_score = 0
+
             total_quality += q_score
             if q_score >= 85:
                 quality_dist['high'] += 1
@@ -119,7 +124,9 @@ def get_dashboard_stats():
             "active_jobs": active_jobs,
             "active_job": active_job,
             "recent_collections": recent_collections,
+            "categories": categories_list,
             "categories_distribution": categories_list,
+            "cities": cities_list,
             "cities_distribution": cities_list,
             "quality_distribution": quality_dist,
             "is_live_firestore": is_live_firestore(),

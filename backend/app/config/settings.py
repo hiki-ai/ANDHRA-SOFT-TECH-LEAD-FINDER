@@ -105,8 +105,15 @@ class Settings:
     @classmethod
     def get_admin_emails(cls) -> list:
         raw = os.getenv('ADMIN_EMAILS') or os.getenv('ADMIN_EMAIL') or 'admin@andhrasofttech.com'
-        emails = [e.strip().lower() for e in raw.split(',') if e.strip()]
-        return emails if emails else cls.ADMIN_EMAILS
+        raw = raw.strip().strip('[]"\'')
+        emails = [e.strip().strip('"\'').lower() for e in raw.split(',') if e.strip()]
+        return emails if emails else [e.strip().lower() for e in cls.ADMIN_EMAILS]
+
+    @classmethod
+    def get_admin_uids(cls) -> list:
+        raw = os.getenv('ADMIN_UIDS') or os.getenv('ADMIN_UID') or ''
+        raw = raw.strip().strip('[]"\'')
+        return [u.strip().strip('"\'') for u in raw.split(',') if u.strip()]
 
     # Source Connector Credentials
     GOOGLE_MAPS_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY', os.getenv('GOOGLE_PLACES_API_KEY', '')).strip()

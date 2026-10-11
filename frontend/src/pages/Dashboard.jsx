@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useOutletContext, Link } from 'react-router-dom';
 import {
   Users,
@@ -54,12 +54,22 @@ export function Dashboard() {
     is_live_firestore: false,
   });
 
+  const inFlightRef = useRef(false);
+  const retryCountRef = useRef(0);
+  const isMountedRef = useRef(true);
+
   const fetchStats = useCallback(async (isSilent = false) => {
+    // Prevent overlapping duplicate requests
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+
     if (!isSilent) setLoading(true);
     else setRefreshing(true);
 
     try {
       const data = await dashboardService.getStats();
+      if (!isMountedRef.current) return;
+
       if (data) {
         setStats({
           total_vendors: data.total_vendors || 0,
@@ -77,33 +87,74 @@ export function Dashboard() {
           is_live_firestore: Boolean(data.is_live_firestore),
         });
         setError(null);
+        retryCountRef.current = 0;
       }
     } catch (err) {
+      if (!isMountedRef.current) return;
       console.error('[Dashboard] Error fetching telemetry:', err);
-      const friendlyMsg = err?.status === 401
-        ? 'Session expired or unauthorized. Please re-authenticate as an administrator.'
-        : (err?.message || 'Failed to load live database telemetry. Please ensure the backend API is running.');
+
+      const status = err?.status;
+      let friendlyMsg;
+
+      if (status === 401) {
+        friendlyMsg = 'Session expired or unauthorized. Please re-authenticate as an administrator.';
+      } else if (status === 403) {
+        friendlyMsg = err?.message || 'Access denied (HTTP 403 Forbidden). Administrator privileges are required to view live telemetry.';
+      } else {
+        friendlyMsg = err?.message || 'Failed to load live database telemetry. Please ensure the backend API is running.';
+      }
+
       setError(friendlyMsg);
+
+      // Bounded retry ONLY for transient non-auth network errors (max 2 retries, never for 401 or 403)
+      const isTransient = status !== 401 && status !== 403;
+      if (!isSilent && isTransient && retryCountRef.current < 2) {
+        retryCountRef.current += 1;
+        setTimeout(() => {
+          if (isMountedRef.current) {
+            fetchStats(false);
+          }
+        }, 3000);
+      }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      inFlightRef.current = false;
+      if (isMountedRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
+  const handleManualRetry = useCallback(() => {
+    retryCountRef.current = 0;
+    setError(null);
+    fetchStats(false);
+  }, [fetchStats]);
+
+  // Initial load when authentication state is resolved
   useEffect(() => {
-    // Wait until Firebase Auth restores session before making protected requests
+    isMountedRef.current = true;
     if (authLoading) return;
     if (!isAuthenticated) return;
 
-    fetchStats();
-    // Auto-refresh stats periodically only when backend is healthy to avoid hammering an unavailable backend
+    fetchStats(false);
+
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, [authLoading, isAuthenticated, fetchStats]);
+
+  // Periodic background refresh: active ONLY when authenticated and healthy.
+  // Stops completely on any error (especially 401/403) to prevent repeated hammering.
+  useEffect(() => {
+    if (authLoading || !isAuthenticated || error) return;
+
     const timer = setInterval(() => {
-      if (!error) {
-        fetchStats(true);
-      }
-    }, 15000);
+      fetchStats(true);
+    }, 30000);
+
     return () => clearInterval(timer);
-  }, [fetchStats, authLoading, isAuthenticated, error]);
+  }, [authLoading, isAuthenticated, error, fetchStats]);
 
   const handlePause = async () => {
     if (!stats.active_job?.id) return;
@@ -185,7 +236,7 @@ export function Dashboard() {
             size="sm"
             iconLeft={RefreshCw}
             loading={refreshing}
-            onClick={() => fetchStats(false)}
+            onClick={handleManualRetry}
           >
             Refresh
           </Button>
@@ -213,7 +264,7 @@ export function Dashboard() {
             <h4 className="text-xs font-bold text-rose-900">Backend Connection Notice</h4>
             <p className="text-xs text-rose-700 mt-0.5">{error}</p>
           </div>
-          <Button size="sm" variant="outline" onClick={() => fetchStats(false)}>
+          <Button size="sm" variant="outline" onClick={handleManualRetry} loading={loading}>
             Retry
           </Button>
         </div>

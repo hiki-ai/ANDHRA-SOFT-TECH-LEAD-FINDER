@@ -120,6 +120,15 @@ def run_tests():
     assert r_bad_token.status_code == 401, f"Expected 401 for invalid bearer token, got {r_bad_token.status_code}"
     print("[PASS] 7b. Invalid bearer token rejected with 401.")
 
+    # Ordinary user token check (authenticated but non-admin: must return HTTP 403 Forbidden)
+    r_user_token = client.get('/api/v1/dashboard/stats', headers={"Authorization": "Bearer test_user_token"})
+    assert r_user_token.status_code == 403, f"Expected 403 for non-admin user token, got {r_user_token.status_code}"
+    err_json = r_user_token.get_json()
+    assert err_json.get('success') is False
+    assert err_json.get('error', {}).get('code') == 'FORBIDDEN'
+    assert 'administrator privileges' in err_json.get('error', {}).get('message', '').lower()
+    print("[PASS] 7c. Ordinary user strictly rejected with HTTP 403 Forbidden on admin endpoint.")
+
     # 8. Authenticated Dashboard stats on empty database
     admin_headers = {"Authorization": "Bearer test_admin_token", "Origin": prod_origin}
 

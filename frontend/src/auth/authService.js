@@ -124,8 +124,16 @@ export const authService = {
       const user = userCredential.user;
       const token = await user.getIdToken();
 
-      let role = isSystemAdminEmail(cleanEmail) ? 'admin' : 'user';
-      let status = isSystemAdminEmail(cleanEmail) ? 'active' : 'pending';
+      let hasAdminClaim = false;
+      try {
+        const tokenResult = await user.getIdTokenResult();
+        hasAdminClaim = tokenResult?.claims?.admin === true || tokenResult?.claims?.role === 'admin';
+      } catch {
+        // ignore
+      }
+
+      let role = (isSystemAdminEmail(cleanEmail) || hasAdminClaim) ? 'admin' : 'user';
+      let status = (isSystemAdminEmail(cleanEmail) || hasAdminClaim) ? 'active' : 'pending';
       let fullName = user.displayName || '';
 
       if (db) {
@@ -133,7 +141,9 @@ export const authService = {
           const userDoc = await getDoc(doc(db, 'users', user.uid));
           if (userDoc.exists()) {
             const data = userDoc.data();
-            role = isSystemAdminEmail(cleanEmail) ? 'admin' : (data.role || 'user');
+            const firestoreRole = (data.role || '').toLowerCase().trim();
+            const isAdminRole = firestoreRole === 'admin' || firestoreRole === 'administrator' || data.isAdmin === true;
+            role = (isSystemAdminEmail(cleanEmail) || hasAdminClaim || isAdminRole) ? 'admin' : 'user';
             status = data.status || status;
             fullName = data.fullName || fullName;
           }
@@ -179,10 +189,18 @@ export const authService = {
         if (firebaseUser) {
           try {
             const token = await firebaseUser.getIdToken();
+            let hasAdminClaim = false;
+            try {
+              const tokenResult = await firebaseUser.getIdTokenResult();
+              hasAdminClaim = tokenResult?.claims?.admin === true || tokenResult?.claims?.role === 'admin';
+            } catch {
+              // ignore
+            }
+
             const cleanEmail = (firebaseUser.email || '').toLowerCase().trim();
 
-            let role = isSystemAdminEmail(cleanEmail) ? 'admin' : 'user';
-            let status = isSystemAdminEmail(cleanEmail) ? 'active' : 'pending';
+            let role = (isSystemAdminEmail(cleanEmail) || hasAdminClaim) ? 'admin' : 'user';
+            let status = (isSystemAdminEmail(cleanEmail) || hasAdminClaim) ? 'active' : 'pending';
             let fullName = firebaseUser.displayName || '';
 
             if (db) {
@@ -190,7 +208,9 @@ export const authService = {
                 const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
                 if (userDoc.exists()) {
                   const data = userDoc.data();
-                  role = isSystemAdminEmail(cleanEmail) ? 'admin' : (data.role || 'user');
+                  const firestoreRole = (data.role || '').toLowerCase().trim();
+                  const isAdminRole = firestoreRole === 'admin' || firestoreRole === 'administrator' || data.isAdmin === true;
+                  role = (isSystemAdminEmail(cleanEmail) || hasAdminClaim || isAdminRole) ? 'admin' : 'user';
                   status = data.status || status;
                   fullName = data.fullName || fullName;
                 }

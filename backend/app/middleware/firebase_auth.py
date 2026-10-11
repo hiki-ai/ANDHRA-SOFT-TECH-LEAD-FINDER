@@ -35,15 +35,24 @@ def require_auth(f):
                 "error": {"code": "AUTH_REQUIRED", "message": "Bearer token must not be empty"}
             }), 401
 
-        # Allow explicit test token only when TESTING mode is active
-        if Settings.TESTING and token == "test_admin_token":
-            admin_emails = Settings.get_admin_emails()
-            request.current_user = {
-                "uid": "test_admin_uid",
-                "email": admin_emails[0] if admin_emails else "admin@andhrasofttech.com",
-                "role": "admin"
-            }
-            return f(*args, **kwargs)
+        # Allow explicit test tokens only when TESTING mode is active
+        if Settings.TESTING:
+            if token == "test_admin_token":
+                admin_emails = Settings.get_admin_emails()
+                request.current_user = {
+                    "uid": "test_admin_uid",
+                    "email": admin_emails[0] if admin_emails else "admin@andhrasofttech.com",
+                    "role": "admin"
+                }
+                return f(*args, **kwargs)
+            elif token == "test_user_token":
+                return jsonify({
+                    "success": False,
+                    "error": {
+                        "code": "FORBIDDEN",
+                        "message": "User 'test_user@example.com' does not have administrator privileges. Administrator approval is required."
+                    }
+                }), 403
 
         init_firebase_admin()
 
@@ -54,31 +63,81 @@ def require_auth(f):
         if firebase_admin._apps and is_live_firestore():
             try:
                 decoded_token = auth.verify_id_token(token)
-                email = decoded_token.get('email', '').strip().lower()
-                uid = decoded_token.get('uid')
-                is_admin_claim = decoded_token.get('admin') is True or decoded_token.get('role') == 'admin'
-                admin_emails = Settings.get_admin_emails()
-                is_admin_email = email in admin_emails
+                email = (
+                    decoded_token.get('email') or
+                    decoded_token.get('firebase', {}).get('identities', {}).get('email', [None])[0] or
+                    ''
+                ).strip().lower()
+                uid = decoded_token.get('uid') or decoded_token.get('user_id') or decoded_token.get('sub')
 
+                # 1. Check custom claims in ID token
+                is_admin_claim = decoded_token.get('admin') is True or str(decoded_token.get('role', '')).lower() == 'admin'
+
+                # 2. Check email allowlist
+                admin_emails = Settings.get_admin_emails()
+                is_admin_email = bool(email and email in admin_emails)
+
+                # 3. Check UID allowlist
+                admin_uids = Settings.get_admin_uids()
+                is_admin_uid = bool(uid and uid in admin_uids)
+
+                # 4. Check Cloud Firestore user profile
                 is_firestore_admin = False
-                if not (is_admin_claim or is_admin_email) and uid:
+                if not (is_admin_claim or is_admin_email or is_admin_uid) and (uid or email):
                     try:
                         from ..config.firebase import get_firestore_db
                         db = get_firestore_db()
-                        user_doc = db.collection('users').document(uid).get()
-                        if user_doc and getattr(user_doc, 'exists', True):
-                            u_data = user_doc.to_dict() or {}
-                            if u_data.get('role') == 'admin' and u_data.get('status') == 'active':
-                                is_firestore_admin = True
-                    except Exception:
-                        pass
+                        user_doc = None
 
-                if not (is_admin_claim or is_admin_email or is_firestore_admin):
+                        # Direct lookup by UID document key
+                        if uid:
+                            doc_candidate = db.collection('users').document(uid).get()
+                            if doc_candidate and getattr(doc_candidate, 'exists', False):
+                                user_doc = doc_candidate
+
+                        # Direct lookup by email document key
+                        if (not user_doc) and email:
+                            doc_candidate = db.collection('users').document(email).get()
+                            if doc_candidate and getattr(doc_candidate, 'exists', False):
+                                user_doc = doc_candidate
+
+                        # Query lookup by 'uid' attribute
+                        if (not user_doc) and uid:
+                            docs = list(db.collection('users').where('uid', '==', uid).limit(1).stream())
+                            if docs:
+                                user_doc = docs[0]
+
+                        # Query lookup by 'email' attribute
+                        if (not user_doc) and email:
+                            docs = list(db.collection('users').where('email', '==', email).limit(1).stream())
+                            if docs:
+                                user_doc = docs[0]
+
+                        if user_doc:
+                            u_data = user_doc.to_dict() or {}
+                            u_role = str(u_data.get('role', '')).strip().lower()
+                            u_status = str(u_data.get('status', 'active')).strip().lower()
+
+                            is_role_admin = (
+                                u_role in ('admin', 'administrator', 'superadmin') or
+                                u_data.get('admin') is True or
+                                u_data.get('isAdmin') is True or
+                                u_data.get('is_admin') is True
+                            )
+                            is_status_valid = u_status not in ('disabled', 'suspended', 'inactive', 'rejected', 'pending')
+
+                            if is_role_admin and is_status_valid:
+                                is_firestore_admin = True
+                    except Exception as fs_err:
+                        print(f"[Auth] Notice: Firestore user profile verification error: {fs_err}")
+
+                if not (is_admin_claim or is_admin_email or is_admin_uid or is_firestore_admin):
+                    print(f"[Auth] Admin authorization denied for user '{email or uid}'. Missing required admin role.")
                     return jsonify({
                         "success": False,
                         "error": {
                             "code": "FORBIDDEN",
-                            "message": f"User '{email}' has role 'user' and is not authorized as an administrator. Administrator approval is required."
+                            "message": f"User '{email or uid}' does not have administrator privileges. Administrator approval is required."
                         }
                     }), 403
 
@@ -143,15 +202,44 @@ def require_auth(f):
                         payload_part = token.split('.')[1]
                         padded = payload_part + '=' * (-len(payload_part) % 4)
                         claims = json.loads(base64.urlsafe_b64decode(padded.encode('utf-8')).decode('utf-8'))
-                        email = claims.get('email', '').strip().lower()
+                        email = (claims.get('email') or '').strip().lower()
+                        uid = claims.get('user_id') or claims.get('sub') or claims.get('uid') or 'local_admin'
                         admin_emails = Settings.get_admin_emails()
-                        if email in admin_emails or claims.get('admin') is True:
+                        admin_uids = Settings.get_admin_uids()
+                        is_admin_email = bool(email and email in admin_emails)
+                        is_admin_uid = bool(uid and uid in admin_uids)
+                        is_admin_claim = claims.get('admin') is True or str(claims.get('role', '')).lower() == 'admin'
+
+                        is_in_memory_admin = False
+                        if not (is_admin_email or is_admin_uid or is_admin_claim) and uid:
+                            try:
+                                from ..config.firebase import get_firestore_db
+                                db = get_firestore_db()
+                                u_doc = db.collection('users').document(uid).get()
+                                if u_doc and getattr(u_doc, 'exists', True):
+                                    u_data = u_doc.to_dict() or {}
+                                    u_role = str(u_data.get('role', '')).lower()
+                                    u_status = str(u_data.get('status', 'active')).lower()
+                                    if u_role in ('admin', 'administrator') and u_status not in ('disabled', 'suspended', 'rejected', 'pending'):
+                                        is_in_memory_admin = True
+                            except Exception:
+                                pass
+
+                        if is_admin_email or is_admin_uid or is_admin_claim or is_in_memory_admin:
                             request.current_user = {
-                                "uid": claims.get('user_id') or claims.get('sub', 'local_admin'),
+                                "uid": uid,
                                 "email": email or (admin_emails[0] if admin_emails else "admin@andhrasofttech.com"),
                                 "role": "admin"
                             }
                             return f(*args, **kwargs)
+                        else:
+                            return jsonify({
+                                "success": False,
+                                "error": {
+                                    "code": "FORBIDDEN",
+                                    "message": f"User '{email or uid}' does not have administrator privileges. Administrator approval is required."
+                                }
+                            }), 403
                     except Exception:
                         pass
 
