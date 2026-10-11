@@ -25,12 +25,19 @@ class MagicpinConnector(BaseCollector):
     """
 
     def __init__(self, partner_key: Optional[str] = None):
-        self._partner_key = (
-            partner_key or
-            os.getenv('MAGICPIN_API_KEY') or
-            os.getenv('MAGICPIN_PARTNER_KEY') or
-            ''
-        ).strip()
+        self._explicit_key = partner_key.strip() if partner_key else ""
+
+    def get_partner_key(self) -> str:
+        if self._explicit_key:
+            return self._explicit_key
+        try:
+            from backend.app.config.settings import Settings
+            key = Settings.get_magicpin_api_key()
+            if key:
+                return key
+        except Exception:
+            pass
+        return (os.getenv('MAGICPIN_API_KEY') or os.getenv('MAGICPIN_PARTNER_KEY') or '').strip()
 
     def get_source_id(self) -> str:
         return "magicpin"
@@ -39,7 +46,8 @@ class MagicpinConnector(BaseCollector):
         return "Magicpin (Merchant Partner / License Required)"
 
     def is_configured(self) -> bool:
-        return bool(self._partner_key and len(self._partner_key) > 8 and not self._partner_key.startswith('your_'))
+        key = self.get_partner_key()
+        return bool(key and len(key) >= 15 and not key.startswith('your_'))
 
     def get_status(self) -> Dict[str, Any]:
         configured = self.is_configured()
@@ -49,6 +57,7 @@ class MagicpinConnector(BaseCollector):
             "status": "active" if configured else "authorization_required",
             "is_available": configured,
             "required_keys": ["MAGICPIN_API_KEY"],
+            "rate_limit": "Commercial merchant feed agreement required",
             "message": (
                 "Magicpin Merchant Partner integration is authorized and active."
                 if configured
@@ -66,8 +75,8 @@ class MagicpinConnector(BaseCollector):
     ) -> Generator[Dict[str, Any], None, None]:
         if not self.is_configured():
             raise RuntimeError(
-                "Magicpin connector is disabled: Magicpin does not offer an open public API. "
-                "Official Merchant Partner API credentials are required to activate this source. "
+                "AUTHORIZATION_REQUIRED: Magicpin does not offer an open public directory API. "
+                "Official Merchant Partner API credentials or licensed dataset integration is required to activate this connector. "
                 "Please configure MAGICPIN_API_KEY with authorized credentials."
             )
 

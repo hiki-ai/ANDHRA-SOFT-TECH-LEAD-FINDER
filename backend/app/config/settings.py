@@ -120,6 +120,18 @@ class Settings:
     JUSTDIAL_API_KEY = os.getenv('JUSTDIAL_API_KEY', '').strip()
     MAGICPIN_API_KEY = os.getenv('MAGICPIN_API_KEY', '').strip()
 
+    @classmethod
+    def get_google_maps_api_key(cls) -> str:
+        return (os.getenv('GOOGLE_MAPS_API_KEY') or os.getenv('GOOGLE_PLACES_API_KEY') or cls.GOOGLE_MAPS_API_KEY or '').strip()
+
+    @classmethod
+    def get_justdial_api_key(cls) -> str:
+        return (os.getenv('JUSTDIAL_API_KEY') or os.getenv('JUSTDIAL_PARTNER_KEY') or cls.JUSTDIAL_API_KEY or '').strip()
+
+    @classmethod
+    def get_magicpin_api_key(cls) -> str:
+        return (os.getenv('MAGICPIN_API_KEY') or os.getenv('MAGICPIN_PARTNER_KEY') or cls.MAGICPIN_API_KEY or '').strip()
+
     # CORS Allowed Origins
     _DEFAULT_ORIGINS = [
         'https://andhra-soft-tech-lead-finder.vercel.app',

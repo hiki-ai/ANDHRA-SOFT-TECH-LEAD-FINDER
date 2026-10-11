@@ -21,6 +21,11 @@ def list_collections():
             if not data:
                 continue
             data['id'] = doc.id
+            if not data.get('source_name'):
+                data['source_name'] = data.get('current_source') or (
+                    'Google Maps / Google Places API' if data.get('source') == 'google_places'
+                    else (data.get('source') or 'Google Maps / Google Places API')
+                )
             collections.append(data)
     except Exception as e:
         print(f"[CollectionRoutes] List error: {e}")
@@ -44,6 +49,11 @@ def get_collection(collection_id):
 
     data = doc.to_dict()
     data['id'] = doc.id
+    if not data.get('source_name'):
+        data['source_name'] = data.get('current_source') or (
+            'Google Maps / Google Places API' if data.get('source') == 'google_places'
+            else (data.get('source') or 'Google Maps / Google Places API')
+        )
     return jsonify({
         "success": True,
         "data": data
@@ -96,16 +106,22 @@ def create_collection():
         "location": location,
         "target_count": target_count,
         "source": source,
+        "source_name": source_name,
         "current_source": source_name,
         "found": 0,
+        "found_count": 0,
         "valid": 0,
+        "valid_count": 0,
         "duplicate": 0,
+        "duplicate_count": 0,
         "failed": 0,
+        "failed_count": 0,
         "progress": 0,
         "status": "pending" if connector_ready else "failed",
         "error_message": None if connector_ready else connector_error,
         "started_at": now_iso,
         "completed_at": None if connector_ready else now_iso,
+        "updated_at": now_iso,
     }
 
     db.collection('collections').document(job_id).set(job_doc)
@@ -145,6 +161,16 @@ def create_collection():
                 worker.process_job(job_id, category, location, target_count, source=source)
             except Exception as thread_err:
                 print(f"[CollectionRoutes] Worker thread execution error: {thread_err}")
+                now_fail_iso = datetime.now(timezone.utc).isoformat()
+                try:
+                    db.collection('collections').document(job_id).update({
+                        "status": "failed",
+                        "error_message": f"Worker execution failure: {str(thread_err)}",
+                        "completed_at": now_fail_iso,
+                        "updated_at": now_fail_iso,
+                    })
+                except Exception:
+                    pass
 
         threading.Thread(target=_run_worker, daemon=True).start()
 

@@ -5,8 +5,9 @@ import { Select } from '../common/Select';
 import { Input } from '../common/Input';
 import { Button } from '../common/Button';
 import { useToast } from '../../context/ToastContext';
-import { Play, Sparkles, ShieldAlert, AlertTriangle } from 'lucide-react';
+import { Play, Sparkles, ShieldAlert, AlertTriangle, CheckCircle2, Lock } from 'lucide-react';
 import { collectionService } from '../../services/collectionService';
+import { sourceService } from '../../services/sourceService';
 
 const CATEGORIES = [
   'Furniture',
@@ -45,9 +46,28 @@ export function QuickCollectionModal({ isOpen, onClose, onJobCreated }) {
   const [location, setLocation] = useState('');
   const [targetCount, setTargetCount] = useState('500');
   const [source, setSource] = useState('google_places');
+  const [sourcesStatus, setSourcesStatus] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState({});
   const toast = useToast();
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    let isMounted = true;
+    sourceService.getSources()
+      .then((res) => {
+        const list = res?.data || res;
+        if (isMounted && Array.isArray(list)) {
+          const map = {};
+          list.forEach((s) => { map[s.id] = s; });
+          setSourcesStatus(map);
+        }
+      })
+      .catch((err) => {
+        console.warn('[QuickCollectionModal] Could not fetch sources:', err);
+      });
+    return () => { isMounted = false; };
+  }, [isOpen]);
 
   const validate = () => {
     const errs = {};
@@ -152,15 +172,49 @@ export function QuickCollectionModal({ isOpen, onClose, onJobCreated }) {
           helperText="Select authorized provider API connector."
         />
 
-        {/* Source Compliance Notice */}
-        {source !== 'google_places' && (
-          <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 flex items-start gap-2.5 text-xs text-amber-800">
-            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-            <p className="leading-relaxed">
-              This source requires an official enterprise partnership agreement or licensed commercial feed. Unconfigured sources will be prevented from running without valid server credentials.
-            </p>
-          </div>
-        )}
+        {/* Dynamic Source Status Notice */}
+        {(() => {
+          const currentSourceInfo = sourcesStatus[source];
+          const status = currentSourceInfo?.status || (source === 'google_places' ? 'not_configured' : 'authorization_required');
+
+          if (status === 'active') {
+            return (
+              <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 flex items-start gap-2.5 text-xs text-emerald-800">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <p className="leading-relaxed">
+                  <strong>Google Places API Active:</strong> Official Google Maps Platform connector is configured on Render. Capped at max 60 places per text search query.
+                </p>
+              </div>
+            );
+          } else if (status === 'authorization_required') {
+            return (
+              <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-200 flex items-start gap-2.5 text-xs text-indigo-800">
+                <Lock className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                <p className="leading-relaxed">
+                  <strong>Authorization Required:</strong> {currentSourceInfo?.message || 'This source requires an official enterprise partnership agreement or licensed commercial feed. Unconfigured sources will be prevented from running without valid server credentials.'}
+                </p>
+              </div>
+            );
+          } else if (status === 'quota_exceeded') {
+            return (
+              <div className="p-3 bg-rose-50 rounded-xl border border-rose-200 flex items-start gap-2.5 text-xs text-rose-800">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <p className="leading-relaxed">
+                  <strong>Quota Exceeded:</strong> Google Places API quota exceeded or billing not active on Google Cloud Platform.
+                </p>
+              </div>
+            );
+          } else {
+            return (
+              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 flex items-start gap-2.5 text-xs text-amber-800">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <p className="leading-relaxed">
+                  <strong>Not Configured:</strong> {currentSourceInfo?.message || 'GOOGLE_MAPS_API_KEY is not configured in the server environment. Please set GOOGLE_MAPS_API_KEY in your Render environment variables to activate this connector.'}
+                </p>
+              </div>
+            );
+          }
+        })()}
 
         {/* Permitted source compliance notice */}
         <div className="p-3 bg-surface-50 rounded-xl border border-surface-200/80 flex items-start gap-2.5 text-xs text-surface-600">

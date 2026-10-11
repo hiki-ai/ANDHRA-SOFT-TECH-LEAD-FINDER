@@ -223,23 +223,33 @@ export function Collections() {
                       </div>
                     </td>
                     <td className="py-3.5 px-4 text-surface-700">
-                      <span className="font-bold text-surface-900">{formatNumber(col.found || 0)}</span>
+                      <span className="font-bold text-surface-900">{formatNumber(col.found_count ?? col.found ?? 0)}</span>
                       <span className="text-surface-400"> / {formatNumber(col.target_count || 0)}</span>
                     </td>
                     <td className="py-3.5 px-4 font-bold text-emerald-700">
-                      {formatNumber(col.valid || 0)}
+                      {formatNumber(col.valid_count ?? col.valid ?? 0)}
                     </td>
                     <td className="py-3.5 px-4 text-amber-700 font-medium">
-                      {formatNumber(col.duplicate || 0)}
+                      {formatNumber(col.duplicate_count ?? col.duplicate ?? 0)}
                     </td>
                     <td className="py-3.5 px-4">
-                      <Badge
-                        variant={statusVariantMap[col.status] || 'neutral'}
-                        dot
-                        pulse={col.status === 'running'}
-                      >
-                        {String(col.status || 'pending').toUpperCase()}
-                      </Badge>
+                      <div className="flex items-center gap-1.5">
+                        <Badge
+                          variant={statusVariantMap[col.status] || 'neutral'}
+                          dot
+                          pulse={col.status === 'running'}
+                        >
+                          {String(col.status || 'pending').toUpperCase()}
+                        </Badge>
+                        {col.status === 'failed' && col.error_message && (
+                          <span
+                            title={col.error_message}
+                            className="inline-flex cursor-help text-rose-500 hover:text-rose-700"
+                          >
+                            <AlertCircle className="w-3.5 h-3.5" />
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="py-3.5 px-4 text-surface-500">
                       {formatDate(col.started_at)}

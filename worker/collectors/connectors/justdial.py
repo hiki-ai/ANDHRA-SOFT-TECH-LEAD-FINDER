@@ -25,12 +25,19 @@ class JustdialConnector(BaseCollector):
     """
 
     def __init__(self, partner_key: Optional[str] = None):
-        self._partner_key = (
-            partner_key or
-            os.getenv('JUSTDIAL_API_KEY') or
-            os.getenv('JUSTDIAL_PARTNER_KEY') or
-            ''
-        ).strip()
+        self._explicit_key = partner_key.strip() if partner_key else ""
+
+    def get_partner_key(self) -> str:
+        if self._explicit_key:
+            return self._explicit_key
+        try:
+            from backend.app.config.settings import Settings
+            key = Settings.get_justdial_api_key()
+            if key:
+                return key
+        except Exception:
+            pass
+        return (os.getenv('JUSTDIAL_API_KEY') or os.getenv('JUSTDIAL_PARTNER_KEY') or '').strip()
 
     def get_source_id(self) -> str:
         return "justdial"
@@ -39,7 +46,8 @@ class JustdialConnector(BaseCollector):
         return "Justdial (Enterprise Partner / License Required)"
 
     def is_configured(self) -> bool:
-        return bool(self._partner_key and len(self._partner_key) > 8 and not self._partner_key.startswith('your_'))
+        key = self.get_partner_key()
+        return bool(key and len(key) >= 15 and not key.startswith('your_'))
 
     def get_status(self) -> Dict[str, Any]:
         configured = self.is_configured()
@@ -49,6 +57,7 @@ class JustdialConnector(BaseCollector):
             "status": "active" if configured else "authorization_required",
             "is_available": configured,
             "required_keys": ["JUSTDIAL_API_KEY"],
+            "rate_limit": "Commercial enterprise feed agreement required",
             "message": (
                 "Justdial Enterprise Partner integration is authorized and active."
                 if configured
@@ -66,13 +75,12 @@ class JustdialConnector(BaseCollector):
     ) -> Generator[Dict[str, Any], None, None]:
         if not self.is_configured():
             raise RuntimeError(
-                "Justdial connector is disabled: Justdial does not offer a public API. "
-                "An authorized Enterprise Partner Agreement is required to enable this source. "
+                "AUTHORIZATION_REQUIRED: Justdial does not offer a public developer API. "
+                "An authorized Enterprise Partner Agreement or licensed commercial data feed is required to activate this connector. "
                 "Please configure JUSTDIAL_API_KEY with authorized credentials."
             )
 
         # When enterprise credentials are supplied, official partner feed logic executes here
         print(f"[JustdialConnector] Searching enterprise feed for {category} in {location}...")
-        # Empty generator for safety if partner credentials are mock
         return
         yield {}

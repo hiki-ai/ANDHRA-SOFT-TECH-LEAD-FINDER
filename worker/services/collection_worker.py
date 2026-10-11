@@ -84,7 +84,10 @@ class CollectionWorker:
         self.progress_service.update_job_progress(job_id, {
             "status": "running",
             "started_at": now_iso,
-            "current_source": connector.get_source_name()
+            "source": source,
+            "source_name": connector.get_source_name(),
+            "current_source": connector.get_source_name(),
+            "updated_at": now_iso,
         })
 
         # 4. Fetch existing dedupe keys to prevent duplicate insertions
@@ -164,13 +167,18 @@ class CollectionWorker:
                     self.progress_service.commit_batch(job_id, batch)
                     batch = []
                     progress_pct = min(100, int((found_count / target_count) * 100)) if target_count > 0 else 0
+                    now_update_iso = datetime.now(timezone.utc).isoformat()
                     self.progress_service.update_job_progress(job_id, {
                         "found": found_count,
+                        "found_count": found_count,
                         "valid": valid_count,
+                        "valid_count": valid_count,
                         "duplicate": duplicate_count,
+                        "duplicate_count": duplicate_count,
                         "failed": failed_count,
+                        "failed_count": failed_count,
                         "progress": progress_pct,
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": now_update_iso,
                     })
 
                 if found_count >= target_count:
@@ -189,9 +197,13 @@ class CollectionWorker:
             self.progress_service.update_job_progress(job_id, {
                 "status": "completed",
                 "found": found_count,
+                "found_count": found_count,
                 "valid": valid_count,
+                "valid_count": valid_count,
                 "duplicate": duplicate_count,
+                "duplicate_count": duplicate_count,
                 "failed": failed_count,
+                "failed_count": failed_count,
                 "progress": progress_pct,
                 "completed_at": completed_iso,
                 "updated_at": completed_iso,

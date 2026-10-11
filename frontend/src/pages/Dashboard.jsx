@@ -18,6 +18,7 @@ import {
   RefreshCw,
   AlertCircle,
   Radio,
+  Database,
 } from 'lucide-react';
 import { Loader } from '../components/common/Loader';
 import { StatCard } from '../components/common/StatCard';
@@ -29,6 +30,7 @@ import { useToast } from '../context/ToastContext';
 import { useAuth } from '../hooks/useAuth';
 import { dashboardService } from '../services/dashboardService';
 import { collectionService } from '../services/collectionService';
+import { sourceService } from '../services/sourceService';
 
 export function Dashboard() {
   const { onOpenNewJob } = useOutletContext() || {};
@@ -53,6 +55,33 @@ export function Dashboard() {
     quality_distribution: { high: 0, medium: 0, low: 0 },
     is_live_firestore: false,
   });
+
+  const [sources, setSources] = useState([
+    {
+      id: 'google_places',
+      name: 'Google Maps / Google Places API',
+      status: 'not_configured',
+      is_available: false,
+      message: 'Checking connector status on backend...',
+      rate_limit: 'Max 60 places per query',
+    },
+    {
+      id: 'justdial',
+      name: 'Justdial (Enterprise Partner / License Required)',
+      status: 'authorization_required',
+      is_available: false,
+      message: 'Official enterprise partnership agreement required.',
+      rate_limit: 'Commercial feed agreement',
+    },
+    {
+      id: 'magicpin',
+      name: 'Magicpin (Merchant Partner / License Required)',
+      status: 'authorization_required',
+      is_available: false,
+      message: 'Official merchant partner credentials required.',
+      rate_limit: 'Commercial feed agreement',
+    },
+  ]);
 
   const inFlightRef = useRef(false);
   const retryCountRef = useRef(0);
@@ -88,6 +117,17 @@ export function Dashboard() {
         });
         setError(null);
         retryCountRef.current = 0;
+      }
+
+      // Fetch official connector statuses
+      try {
+        const sourcesRes = await sourceService.getSources();
+        const sourcesList = sourcesRes?.data || sourcesRes;
+        if (isMountedRef.current && Array.isArray(sourcesList) && sourcesList.length > 0) {
+          setSources(sourcesList);
+        }
+      } catch (srcErr) {
+        console.warn('[Dashboard] Notice: Could not refresh source statuses:', srcErr);
       }
     } catch (err) {
       if (!isMountedRef.current) return;
@@ -321,6 +361,84 @@ export function Dashboard() {
           icon={Award}
           iconBg="bg-purple-50 text-purple-600"
         />
+      </div>
+
+      {/* Business Data Sources & API Integrations */}
+      <div className="bg-white rounded-2xl p-5 border border-surface-200/90 shadow-card">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-surface-100 gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-surface-900 flex items-center gap-2">
+              <Database className="w-4 h-4 text-brand-600" />
+              <span>Business Data Source Integrations</span>
+            </h3>
+            <p className="text-xs text-surface-500 mt-0.5">
+              Configuration, compliance status, and operational quotas for official vendor directories.
+            </p>
+          </div>
+          <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-surface-100 text-surface-600 border border-surface-200 shrink-0">
+            Render Server-Side Verified
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+          {sources.map((src) => {
+            const isAct = src.status === 'active';
+            const isAuthReq = src.status === 'authorization_required';
+            const isNotConfig = src.status === 'not_configured';
+            const isQuota = src.status === 'quota_exceeded';
+
+            let badgeStyle = 'bg-rose-50 text-rose-700 border-rose-200';
+            let badgeText = 'Error';
+            let dotColor = 'bg-rose-500';
+
+            if (isAct) {
+              badgeStyle = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+              badgeText = 'Active & Operational';
+              dotColor = 'bg-emerald-500';
+            } else if (isAuthReq) {
+              badgeStyle = 'bg-indigo-50 text-indigo-700 border-indigo-200';
+              badgeText = 'Authorization Required';
+              dotColor = 'bg-indigo-500';
+            } else if (isNotConfig) {
+              badgeStyle = 'bg-amber-50 text-amber-700 border-amber-200';
+              badgeText = 'Not Configured';
+              dotColor = 'bg-amber-500';
+            } else if (isQuota) {
+              badgeStyle = 'bg-rose-50 text-rose-700 border-rose-200';
+              badgeText = 'Quota Exceeded';
+              dotColor = 'bg-rose-500';
+            }
+
+            return (
+              <div
+                key={src.id}
+                className="p-4 rounded-xl border border-surface-200/90 bg-surface-50/60 flex flex-col justify-between hover:border-surface-300 transition-colors"
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <h4 className="text-xs font-bold text-surface-900 truncate">
+                      {src.name}
+                    </h4>
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 flex items-center gap-1.5 ${badgeStyle}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${dotColor} ${isAct ? 'animate-pulse' : ''}`} />
+                      {badgeText}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-surface-600 leading-relaxed mb-3">
+                    {src.message}
+                  </p>
+                </div>
+
+                <div className="pt-2.5 border-t border-surface-200/70 flex items-center justify-between text-[10px] text-surface-500">
+                  <span className="font-medium text-surface-400">Quota Limit</span>
+                  <span className="font-semibold text-surface-700 truncate ml-2">
+                    {src.rate_limit || (src.id === 'google_places' ? 'Max 60 places / query' : 'Enterprise agreement')}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Live Collection Status Section */}

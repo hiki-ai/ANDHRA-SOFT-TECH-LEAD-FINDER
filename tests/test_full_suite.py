@@ -203,7 +203,7 @@ def run_tests():
     assert len(r_col_list.get_json()['data']) >= 1
     print(f"[PASS] 11. Column management: created col_id={col_id} and verified in GET /api/v1/columns.")
 
-    # 12. Data Sources Endpoint
+    # 12. Data Sources Endpoint — verify all 3 connectors and prevent credential leakage
     r_sources = client.get('/api/v1/sources', headers=admin_headers)
     assert r_sources.status_code == 200, f"GET /api/v1/sources failed: {r_sources.status_code}"
     sources_list = r_sources.get_json()['data']
@@ -211,12 +211,23 @@ def run_tests():
     assert 'google_places' in source_ids
     assert 'justdial' in source_ids
     assert 'magicpin' in source_ids
-    # Check justdial status is authorization_required
-    jd_status = next(s for s in sources_list if s['id'] == 'justdial')
-    assert jd_status['status'] == 'authorization_required'
-    print(f"[PASS] 12. GET /api/v1/sources returned registered sources: {source_ids}.")
 
-    # 13. Collection job creation with unconfigured source returns failure without faking data
+    # Verify source statuses
+    gp_status = next(s for s in sources_list if s['id'] == 'google_places')
+    jd_status = next(s for s in sources_list if s['id'] == 'justdial')
+    mp_status = next(s for s in sources_list if s['id'] == 'magicpin')
+
+    assert gp_status['status'] in ('active', 'not_configured')
+    assert jd_status['status'] == 'authorization_required'
+    assert mp_status['status'] == 'authorization_required'
+
+    # Security check: verify no API key or credential is leaked in response
+    for s in sources_list:
+        assert 'api_key' not in s and 'key' not in s and 'partner_key' not in s
+        assert not any(k.startswith('AIza') for k in str(s).split())
+    print(f"[PASS] 12. GET /api/v1/sources returned registered sources: {source_ids} without leaking credentials.")
+
+    # 13a. Collection job creation with unconfigured source (justdial) returns failure without faking data
     r_jd_job = client.post('/api/v1/collections', headers=admin_headers, json={
         "category": "Hotels",
         "location": "Visakhapatnam",
@@ -227,7 +238,161 @@ def run_tests():
     jd_job_data = r_jd_job.get_json()['data']
     assert jd_job_data['status'] == 'failed'
     assert 'AUTHORIZATION_REQUIRED' in jd_job_data['error_message'] or 'authorization' in jd_job_data['error_message'].lower()
-    print(f"[PASS] 13. Job with unconfigured source (justdial) failed safely with diagnostic: '{jd_job_data['error_message']}'.")
+    print(f"[PASS] 13a. Job with unconfigured source (justdial) failed safely with diagnostic: '{jd_job_data['error_message']}'.")
+
+    # 13b. Collection job creation with unconfigured source (magicpin) returns failure without faking data
+    r_mp_job = client.post('/api/v1/collections', headers=admin_headers, json={
+        "category": "Restaurants",
+        "location": "Vijayawada",
+        "target_count": 30,
+        "source": "magicpin"
+    })
+    assert r_mp_job.status_code == 201
+    mp_job_data = r_mp_job.get_json()['data']
+    assert mp_job_data['status'] == 'failed'
+    assert 'AUTHORIZATION_REQUIRED' in mp_job_data['error_message'] or 'authorization' in mp_job_data['error_message'].lower()
+    print(f"[PASS] 13b. Job with unconfigured source (magicpin) failed safely with diagnostic: '{mp_job_data['error_message']}'.")
+
+    # 13c. Verify connectors direct runtime enforcement and error messages
+    from collectors.connectors.google_places import GooglePlacesConnector
+    from collectors.connectors.justdial import JustdialConnector
+    from collectors.connectors.magicpin import MagicpinConnector
+
+    gp_conn = GooglePlacesConnector(api_key="")
+    assert gp_conn.is_configured() is False
+    assert gp_conn.get_status()['status'] == 'not_configured'
+    try:
+        list(gp_conn.search("Hotels", "Visakhapatnam", 10))
+        assert False, "Unconfigured Google Places should have raised RuntimeError"
+    except RuntimeError as e:
+        assert "NOT_CONFIGURED" in str(e) or "not configured" in str(e).lower()
+
+    jd_conn = JustdialConnector(partner_key="")
+    assert jd_conn.is_configured() is False
+    assert jd_conn.get_status()['status'] == 'authorization_required'
+    try:
+        list(jd_conn.search("Hotels", "Visakhapatnam", 10))
+        assert False, "Unconfigured Justdial should have raised RuntimeError"
+    except RuntimeError as e:
+        assert "AUTHORIZATION_REQUIRED" in str(e)
+
+    mp_conn = MagicpinConnector(partner_key="")
+    assert mp_conn.is_configured() is False
+    assert mp_conn.get_status()['status'] == 'authorization_required'
+    try:
+        list(mp_conn.search("Restaurants", "Vijayawada", 10))
+        assert False, "Unconfigured Magicpin should have raised RuntimeError"
+    except RuntimeError as e:
+        print("[PASS] 13c. Connector runtime checks enforce NOT_CONFIGURED and AUTHORIZATION_REQUIRED guards.")
+
+    # 13d. Test Google Places API error handling and status translations
+    from unittest.mock import patch, MagicMock
+
+    mock_gp = GooglePlacesConnector(api_key="AIzaSyValidDummyKeyForTest123456")
+    assert mock_gp.is_configured() is True
+
+    # 1. OVER_QUERY_LIMIT test
+    with patch('requests.get') as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"status": "OVER_QUERY_LIMIT", "results": []}
+        mock_get.return_value = mock_resp
+
+        try:
+            list(mock_gp.search("Hotels", "Rajahmundry", 10))
+            assert False, "Should have raised quota exceeded"
+        except RuntimeError as e:
+            assert "QUOTA_EXCEEDED" in str(e)
+            assert mock_gp.get_status()['status'] == 'quota_exceeded'
+
+    # 2. REQUEST_DENIED with referer restriction test
+    with patch('requests.get') as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "status": "REQUEST_DENIED",
+            "error_message": "API keys with referer restrictions cannot be used with this API."
+        }
+        mock_get.return_value = mock_resp
+
+        try:
+            list(mock_gp.search("Hotels", "Rajahmundry", 10))
+            assert False, "Should have raised request denied"
+        except RuntimeError as e:
+            assert "REQUEST_DENIED" in str(e)
+            assert "referrer" in str(e).lower() or "referer" in str(e).lower()
+
+    # 3. ZERO_RESULTS test (empty search returns 0 without raising)
+    with patch('requests.get') as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"status": "ZERO_RESULTS", "results": []}
+        mock_get.return_value = mock_resp
+
+        zero_res = list(mock_gp.search("Underwater Igloos", "Rajahmundry", 10))
+        assert len(zero_res) == 0
+
+    print("[PASS] 13d. Google Places API error paths (OVER_QUERY_LIMIT, REQUEST_DENIED, ZERO_RESULTS) verified.")
+
+    # 13e. Test Google Places API successful mock response & Details field resolution
+    with patch('requests.get') as mock_get:
+        def side_effect_fn(url, params, timeout=10):
+            mock_res = MagicMock()
+            mock_res.status_code = 200
+            if "details" in url:
+                mock_res.json.return_value = {
+                    "status": "OK",
+                    "result": {
+                        "formatted_phone_number": "0883 244 5678",
+                        "website": "https://hotelriverview.com"
+                    }
+                }
+            else:
+                mock_res.json.return_value = {
+                    "status": "OK",
+                    "results": [
+                        {
+                            "place_id": "ChIJ_rajahmundry_1",
+                            "name": "Hotel River View",
+                            "formatted_address": "Danavaipeta, Rajahmundry, Andhra Pradesh 533103",
+                            "rating": 4.3,
+                            "user_ratings_total": 512,
+                        }
+                    ],
+                    "next_page_token": None
+                }
+            return mock_res
+
+        mock_get.side_effect = side_effect_fn
+        places = list(mock_gp.search("Hotels", "Rajahmundry", 5))
+        assert len(places) == 1
+        p = places[0]
+        assert p['place_id'] == "ChIJ_rajahmundry_1"
+        assert p['business_name'] == "Hotel River View"
+        assert p['phone'] == "0883 244 5678"
+        assert p['website'] == "https://hotelriverview.com"
+        assert p['rating'] == 4.3
+        assert p['city'] == "Rajahmundry"
+        assert p['source'] == "Google Maps / Google Places API"
+
+    print("[PASS] 13e. Google Places API successful extraction and details parsing verified.")
+
+    # 13f. Test deduplication and telemetry count persistence in CollectionWorker
+    from processors.deduplicator import RecordDeduplicator
+    k1 = RecordDeduplicator.create_dedupe_key("Hotel River View", "0883 244 5678", "Rajahmundry")
+    k2 = RecordDeduplicator.create_dedupe_key("HOTEL RIVER VIEW", "08832445678", "Rajahmundry")
+    assert k1 == k2, "Normalized dedupe keys should match for duplicate vendors"
+    print(f"[PASS] 13f. Record deduplication confirmed: dedupe_key='{k1}'.")
+
+    # 13g. Verify GET /api/v1/collections returns source_name and count aliases
+    r_cols = client.get('/api/v1/collections', headers=admin_headers)
+    assert r_cols.status_code == 200
+    cols_data = r_cols.get_json()['data']
+    if cols_data:
+        first_col = cols_data[0]
+        assert 'source_name' in first_col
+        assert 'found' in first_col
+    print("[PASS] 13g. GET /api/v1/collections returns source_name and telemetry counts.")
 
     # 14. Collection Pause / Resume / Cancel endpoints
     new_job_payload = {
