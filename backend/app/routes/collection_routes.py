@@ -56,30 +56,69 @@ def create_collection():
     category = payload.get('category')
     location = payload.get('location')
     target_count = int(payload.get('target_count', 1000))
+    source = (payload.get('source') or 'google_places').strip().lower()
 
     if not category or not location:
         return jsonify({"success": False, "error": {"code": "VALIDATION_ERROR", "message": "Category and location are required"}}), 400
 
     db = get_firestore_db()
     job_id = f"col_{int(time.time() * 1000)}"
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Resolve connector and check availability
+    import sys
+    import os
+    import threading
+
+    worker_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'worker'))
+    if os.path.isdir(worker_dir) and worker_dir not in sys.path:
+        sys.path.insert(0, worker_dir)
+
+    source_name = "Google Maps / Google Places API"
+    connector_ready = False
+    connector_error = ""
+
+    try:
+        from collectors.source_manager import SourceManager
+        sm = SourceManager()
+        connector = sm.get_connector(source)
+        source_name = connector.get_source_name()
+        connector_ready = connector.is_configured()
+        if not connector_ready:
+            st = connector.get_status()
+            connector_error = f"{st.get('status', 'not_configured').upper()}: {st.get('message', 'Connector not configured')}"
+    except Exception as e:
+        connector_error = f"Source manager error: {str(e)}"
+
     job_doc = {
         "id": job_id,
         "category": category,
         "location": location,
         "target_count": target_count,
+        "source": source,
+        "current_source": source_name,
         "found": 0,
         "valid": 0,
         "duplicate": 0,
         "failed": 0,
         "progress": 0,
-        "status": "pending",
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "completed_at": None,
+        "status": "pending" if connector_ready else "failed",
+        "error_message": None if connector_ready else connector_error,
+        "started_at": now_iso,
+        "completed_at": None if connector_ready else now_iso,
     }
 
     db.collection('collections').document(job_id).set(job_doc)
 
-    # Dispatch to internal worker service if WORKER_URL binding is configured
+    # If connector is not configured, do not start worker; return clear failure state
+    if not connector_ready:
+        return jsonify({
+            "success": True,
+            "data": job_doc,
+            "message": f"Job created but marked failed: {connector_error}"
+        }), 201
+
+    # Dispatch to worker service if WORKER_URL is configured, else execute via daemon thread
     if Settings.WORKER_URL:
         try:
             import requests
@@ -92,16 +131,27 @@ def create_collection():
                     "category": category,
                     "location": location,
                     "target_count": target_count,
+                    "source": source,
                 },
                 timeout=5
             )
         except Exception as e:
             print(f"[CollectionRoutes] Notice: Worker dispatch over binding failed ({Settings.WORKER_URL}): {e}")
+    else:
+        def _run_worker():
+            try:
+                from services.collection_worker import CollectionWorker
+                worker = CollectionWorker(db=db)
+                worker.process_job(job_id, category, location, target_count, source=source)
+            except Exception as thread_err:
+                print(f"[CollectionRoutes] Worker thread execution error: {thread_err}")
+
+        threading.Thread(target=_run_worker, daemon=True).start()
 
     return jsonify({
         "success": True,
         "data": job_doc,
-        "message": "Collection job created successfully in Firestore"
+        "message": "Collection job created and queued for processing"
     }), 201
 
 @collection_bp.route('/<collection_id>/pause', methods=['POST'])

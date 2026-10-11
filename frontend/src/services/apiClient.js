@@ -1,40 +1,82 @@
 /**
- * Axios HTTP Client with Auth Bearer Token Interceptor
+ * Axios HTTP Client with Firebase Auth Bearer Token Interceptor & URL Normalizer
  * Location: frontend/src/services/apiClient.js
  */
 
 import axios from 'axios';
 import { API_CONFIG } from '../config/api';
+import { auth } from '../config/firebase';
 
 export const apiClient = axios.create(API_CONFIG);
 
-// Request interceptor to attach Firebase JWT Bearer token
+// Request interceptor: normalize paths and attach fresh Firebase JWT Bearer token
 apiClient.interceptors.request.use(
-  (config) => {
+  async (config) => {
+    // 1. Sanitize request URL to prevent double prefixes like /api/v1/api/v1
+    if (config.url) {
+      const baseHasV1 = (config.baseURL || '').endsWith('/api/v1');
+      if (baseHasV1 && config.url.startsWith('/api/v1/')) {
+        config.url = config.url.replace(/^\/api\/v1/, '');
+      } else if (baseHasV1 && config.url === '/api/v1') {
+        config.url = '/';
+      }
+    }
+
+    // 2. Attach freshest Firebase Auth ID token
     try {
-      const stored = localStorage.getItem('ast_lead_finder_user');
-      if (stored) {
-        const user = JSON.parse(stored);
-        if (user.token) {
-          config.headers.Authorization = `Bearer ${user.token}`;
+      let token = null;
+
+      // Prefer live token from current authenticated user
+      if (auth && auth.currentUser) {
+        try {
+          token = await auth.currentUser.getIdToken();
+        } catch (tokenErr) {
+          console.warn('[ApiClient] Failed to refresh Firebase token from currentUser:', tokenErr);
         }
+      }
+
+      // Fallback to cached token in localStorage
+      if (!token) {
+        const stored = localStorage.getItem('ast_lead_finder_user');
+        if (stored) {
+          const user = JSON.parse(stored);
+          token = user?.token;
+        }
+      }
+
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
       }
     } catch {
       // Continue without token
     }
+
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-// Response interceptor for unified error formatting
+// Response interceptor for unified, transparent error formatting
 apiClient.interceptors.response.use(
   (response) => response.data,
   (error) => {
-    const errorResponse = error.response?.data?.error || {
-      code: 'NETWORK_ERROR',
-      message: error.message || 'Network request failed',
+    // Extract structured error from backend API JSON response if available
+    const serverError = error.response?.data?.error;
+    const serverMessage = typeof serverError === 'object' ? serverError.message : serverError;
+    const status = error.response?.status;
+
+    let friendlyMessage = serverMessage || error.response?.data?.message || error.message || 'Network request failed';
+
+    if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') {
+      friendlyMessage = `Unable to connect to backend at ${API_CONFIG.baseURL}. Please verify the Render backend service is running and CORS is allowed.`;
+    }
+
+    const errorResponse = {
+      status: status || 0,
+      code: serverError?.code || (status ? `HTTP_${status}` : 'NETWORK_ERROR'),
+      message: friendlyMessage,
     };
+
     return Promise.reject(errorResponse);
   }
 );

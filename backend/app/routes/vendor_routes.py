@@ -90,6 +90,35 @@ def list_vendors():
         }
     })
 
+@vendor_bp.route('/search', methods=['GET'])
+@require_auth
+def search_vendors():
+    query = (request.args.get('q') or '').strip().lower()
+    db = get_firestore_db()
+    col_ref = db.collection('vendors')
+
+    results = []
+    try:
+        for doc in col_ref.stream():
+            data = doc.to_dict()
+            if not data:
+                continue
+            data['id'] = doc.id
+            if (query in str(data.get('business_name', '')).lower() or
+                query in str(data.get('phone', '')) or
+                query in str(data.get('city', '')).lower() or
+                query in str(data.get('category', '')).lower()):
+                results.append(data)
+                if len(results) >= 50:
+                    break
+    except Exception as e:
+        print(f"[VendorSearch] Error: {e}")
+
+    return jsonify({
+        "success": True,
+        "data": results
+    })
+
 @vendor_bp.route('/<vendor_id>', methods=['GET'])
 @require_auth
 def get_vendor(vendor_id):
@@ -235,32 +264,3 @@ def delete_vendor(vendor_id):
             "success": False,
             "error": {"code": "DELETE_FAILED", "message": str(e)}
         }), 400
-
-@vendor_bp.route('/search', methods=['GET'])
-@require_auth
-def search_vendors():
-    query = (request.args.get('q') or '').strip().lower()
-    db = get_firestore_db()
-    col_ref = db.collection('vendors')
-
-    results = []
-    try:
-        for doc in col_ref.stream():
-            data = doc.to_dict()
-            if not data:
-                continue
-            data['id'] = doc.id
-            if (query in str(data.get('business_name', '')).lower() or
-                query in str(data.get('phone', '')) or
-                query in str(data.get('city', '')).lower() or
-                query in str(data.get('category', '')).lower()):
-                results.append(data)
-                if len(results) >= 50:
-                    break
-    except Exception as e:
-        print(f"[VendorSearch] Error: {e}")
-
-    return jsonify({
-        "success": True,
-        "data": results
-    })

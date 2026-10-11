@@ -19,6 +19,7 @@ import {
   AlertCircle,
   Radio,
 } from 'lucide-react';
+import { Loader } from '../components/common/Loader';
 import { StatCard } from '../components/common/StatCard';
 import { Button } from '../components/common/Button';
 import { CollectionProgressCard } from '../components/dashboard/CollectionProgressCard';
@@ -54,7 +55,6 @@ export function Dashboard() {
   const fetchStats = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoading(true);
     else setRefreshing(true);
-    setError(null);
 
     try {
       const data = await dashboardService.getStats();
@@ -74,6 +74,7 @@ export function Dashboard() {
           quality_distribution: data.quality_distribution || { high: 0, medium: 0, low: 0 },
           is_live_firestore: Boolean(data.is_live_firestore),
         });
+        setError(null);
       }
     } catch (err) {
       console.error('[Dashboard] Error fetching telemetry:', err);
@@ -86,12 +87,14 @@ export function Dashboard() {
 
   useEffect(() => {
     fetchStats();
-    // Auto-refresh stats periodically
+    // Auto-refresh stats periodically only when backend is healthy to avoid hammering an unavailable backend
     const timer = setInterval(() => {
-      fetchStats(true);
+      if (!error) {
+        fetchStats(true);
+      }
     }, 15000);
     return () => clearInterval(timer);
-  }, [fetchStats]);
+  }, [fetchStats, error]);
 
   const handlePause = async () => {
     if (!stats.active_job?.id) return;
@@ -131,7 +134,13 @@ export function Dashboard() {
   const medQualityPct = total > 0 ? ((stats.quality_distribution.medium / total) * 100).toFixed(1) : 0;
   const lowQualityPct = total > 0 ? ((stats.quality_distribution.low / total) * 100).toFixed(1) : 0;
 
-  const validPct = total > 0 ? ((stats.valid_vendors / total) * 100).toFixed(1) + '%' : '0%';
+  if (loading && !refreshing && !error) {
+    return (
+      <div className="min-h-[400px] flex items-center justify-center">
+        <Loader size="lg" text="Connecting to backend and aggregating real-time Firestore telemetry..." />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

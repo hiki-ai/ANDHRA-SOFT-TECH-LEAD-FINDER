@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
 import { SearchableSelect } from '../common/SearchableSelect';
+import { Select } from '../common/Select';
 import { Input } from '../common/Input';
 import { Button } from '../common/Button';
 import { useToast } from '../../context/ToastContext';
-import { Play, Sparkles, ShieldAlert } from 'lucide-react';
+import { Play, Sparkles, ShieldAlert, AlertTriangle } from 'lucide-react';
+import { collectionService } from '../../services/collectionService';
 
 const CATEGORIES = [
   'Furniture',
@@ -32,12 +34,17 @@ const LOCATIONS = [
   'Bengaluru, Karnataka',
 ];
 
-import { collectionService } from '../../services/collectionService';
+const SOURCE_OPTIONS = [
+  { value: 'google_places', label: 'Google Maps / Google Places API (Official Maps Platform)' },
+  { value: 'justdial', label: 'Justdial (Enterprise Partner License Required)' },
+  { value: 'magicpin', label: 'Magicpin (Merchant Partner License Required)' },
+];
 
 export function QuickCollectionModal({ isOpen, onClose, onJobCreated }) {
   const [category, setCategory] = useState('');
   const [location, setLocation] = useState('');
   const [targetCount, setTargetCount] = useState('500');
+  const [source, setSource] = useState('google_places');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState({});
   const toast = useToast();
@@ -64,10 +71,15 @@ export function QuickCollectionModal({ isOpen, onClose, onJobCreated }) {
         category: category.trim(),
         location: location.trim(),
         target_count: parseInt(targetCount, 10),
+        source,
       });
 
       const newJob = res?.data || res;
-      toast.success(`Collection job initiated for ${category} in ${location}.`);
+      if (newJob?.status === 'failed') {
+        toast.warning(newJob?.error_message || 'Job created but could not start due to connector requirements.');
+      } else {
+        toast.success(`Collection job initiated for ${category} in ${location}.`);
+      }
       if (onJobCreated) onJobCreated(newJob);
       onClose();
     } catch (err) {
@@ -131,6 +143,25 @@ export function QuickCollectionModal({ isOpen, onClose, onJobCreated }) {
           helperText="Max 50,000 per single collection batch."
         />
 
+        {/* Data Source Selector */}
+        <Select
+          label="Collection Data Source"
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+          options={SOURCE_OPTIONS}
+          helperText="Select authorized provider API connector."
+        />
+
+        {/* Source Compliance Notice */}
+        {source !== 'google_places' && (
+          <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 flex items-start gap-2.5 text-xs text-amber-800">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <p className="leading-relaxed">
+              This source requires an official enterprise partnership agreement or licensed commercial feed. Unconfigured sources will be prevented from running without valid server credentials.
+            </p>
+          </div>
+        )}
+
         {/* Permitted source compliance notice */}
         <div className="p-3 bg-surface-50 rounded-xl border border-surface-200/80 flex items-start gap-2.5 text-xs text-surface-600">
           <ShieldAlert className="w-4 h-4 text-brand-600 shrink-0 mt-0.5" />
@@ -157,3 +188,5 @@ export function QuickCollectionModal({ isOpen, onClose, onJobCreated }) {
     </Modal>
   );
 }
+
+export default QuickCollectionModal;

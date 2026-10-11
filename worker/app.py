@@ -27,6 +27,8 @@ def run_job():
     location = data.get('location')
     target_count = int(data.get('target_count', 100))
 
+    source = data.get('source', 'google_places')
+
     if not job_id or not category or not location:
         return jsonify({
             "success": False,
@@ -38,7 +40,8 @@ def run_job():
             job_id=job_id,
             category=category,
             location=location,
-            target_count=target_count
+            target_count=target_count,
+            source=source
         )
         return jsonify({
             "success": True,

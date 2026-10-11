@@ -7,7 +7,7 @@ Location: backend/app/__init__.py
 ==============================================================================
 """
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request, make_response
 from flask_cors import CORS
 from .config.settings import Settings
 from .config.firebase import init_firebase_admin, is_live_firestore, get_firestore_db
@@ -18,6 +18,7 @@ from .routes.dashboard_routes import dashboard_bp
 from .routes.import_routes import import_bp
 from .routes.export_routes import export_bp
 from .routes.column_routes import column_bp
+from .routes.source_routes import source_bp
 
 def create_app(config_name=None):
     app = Flask(__name__)
@@ -28,13 +29,48 @@ def create_app(config_name=None):
     app.config['SECRET_KEY'] = Settings.SECRET_KEY
     app.config['MAX_CONTENT_LENGTH'] = 30 * 1024 * 1024  # 30MB max upload
 
-    # Enable CORS
-    CORS(app, origins=Settings.CORS_ORIGINS, supports_credentials=True)
+    # Configure CORS with Flask-CORS
+    CORS(
+        app,
+        resources={r"/*": {
+            "origins": Settings.CORS_ORIGINS,
+            "supports_credentials": True,
+            "methods": ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
+            "expose_headers": ["Content-Type", "Authorization", "Content-Disposition"],
+            "max_age": 3600,
+        }}
+    )
+
+    # Global Preflight & CORS after_request handlers to guarantee headers on all status codes
+    @app.before_request
+    def handle_options_preflight():
+        if request.method == 'OPTIONS':
+            origin = request.headers.get('Origin', '')
+            response = make_response(('', 204))
+            if origin and Settings.is_allowed_origin(origin):
+                response.headers['Access-Control-Allow-Origin'] = origin
+                response.headers['Access-Control-Allow-Credentials'] = 'true'
+                response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PATCH, PUT, DELETE, OPTIONS'
+                response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
+                response.headers['Access-Control-Max-Age'] = '3600'
+            return response
+
+    @app.after_request
+    def set_cors_headers(response):
+        origin = request.headers.get('Origin', '')
+        if origin and Settings.is_allowed_origin(origin):
+            response.headers['Access-Control-Allow-Origin'] = origin
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PATCH, PUT, DELETE, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
+            response.headers['Access-Control-Max-Age'] = '3600'
+        return response
 
     # Initialize Firebase Admin singleton
     init_firebase_admin()
 
-    # Register API Blueprints
+    # Register API Blueprints (canonical /api/v1 prefix)
     app.register_blueprint(auth_bp)
     app.register_blueprint(vendor_bp)
     app.register_blueprint(collection_bp)
@@ -42,6 +78,17 @@ def create_app(config_name=None):
     app.register_blueprint(import_bp)
     app.register_blueprint(export_bp)
     app.register_blueprint(column_bp)
+    app.register_blueprint(source_bp)
+
+    # Register un-prefixed aliases for maximum resilience
+    app.register_blueprint(auth_bp, name='auth_alias', url_prefix='/auth')
+    app.register_blueprint(vendor_bp, name='vendors_alias', url_prefix='/vendors')
+    app.register_blueprint(collection_bp, name='collections_alias', url_prefix='/collections')
+    app.register_blueprint(dashboard_bp, name='dashboard_alias', url_prefix='/dashboard')
+    app.register_blueprint(import_bp, name='imports_alias', url_prefix='/imports')
+    app.register_blueprint(export_bp, name='exports_alias', url_prefix='/exports')
+    app.register_blueprint(column_bp, name='columns_alias', url_prefix='/columns')
+    app.register_blueprint(source_bp, name='sources_alias', url_prefix='/sources')
 
     def _health_response():
         live_db = is_live_firestore()
@@ -63,7 +110,7 @@ def create_app(config_name=None):
     def health_check():
         return jsonify(_health_response())
 
-    # Centralized Error Handlers
+    # Centralized Error Handlers (Return structured JSON)
     @app.errorhandler(400)
     def bad_request(error):
         return jsonify({
