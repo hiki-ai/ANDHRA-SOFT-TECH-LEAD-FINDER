@@ -54,6 +54,7 @@ def create_app(config_name=None):
                 response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PATCH, PUT, DELETE, OPTIONS'
                 response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
                 response.headers['Access-Control-Max-Age'] = '3600'
+                response.headers['Vary'] = 'Origin'
             return response
 
     @app.after_request
@@ -65,6 +66,7 @@ def create_app(config_name=None):
             response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PATCH, PUT, DELETE, OPTIONS'
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
             response.headers['Access-Control-Max-Age'] = '3600'
+            response.headers['Vary'] = 'Origin'
         return response
 
     # Initialize Firebase Admin singleton

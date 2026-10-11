@@ -10,7 +10,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { AuthContext } from './AuthContext';
 import { Loader } from '../components/common/Loader';
 
-export function ProtectedRoute({ children }) {
+export function ProtectedRoute({ children, requiredRole = 'admin' }) {
   const context = useContext(AuthContext);
   const location = useLocation();
 
@@ -24,6 +24,11 @@ export function ProtectedRoute({ children }) {
 
   if (!context.isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // Prevent restricted/ordinary users from accessing administrator dashboard
+  if (requiredRole === 'admin' && context.role !== 'admin') {
+    return <Navigate to="/pending-approval" replace />;
   }
 
   return children;

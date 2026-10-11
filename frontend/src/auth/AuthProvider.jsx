@@ -37,6 +37,12 @@ export function AuthProvider({ children }) {
     return loggedInUser;
   }, []);
 
+  const register = useCallback(async (registrationData) => {
+    const registeredUser = await authService.registerUser(registrationData);
+    setUser(registeredUser);
+    return registeredUser;
+  }, []);
+
   const logout = useCallback(async () => {
     await authService.logoutUser();
     setUser(null);
@@ -48,6 +54,7 @@ export function AuthProvider({ children }) {
     role: user?.role || 'guest',
     loading,
     login,
+    register,
     logout,
   };
 

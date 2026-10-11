@@ -12,6 +12,8 @@ import { ProtectedRoute } from '../auth/ProtectedRoute';
 // Pages
 import { Home } from '../pages/Home';
 import { Login } from '../pages/Login';
+import { Register } from '../pages/Register';
+import { PendingApproval } from '../pages/PendingApproval';
 import { Dashboard } from '../pages/Dashboard';
 import { Vendors } from '../pages/Vendors';
 import { VendorDetails } from '../pages/VendorDetails';
@@ -30,9 +32,11 @@ export function AppRoutes() {
         <Route path="/" element={<Home />} />
       </Route>
 
-      {/* Authentication */}
+      {/* Authentication & User Access Status */}
       <Route element={<AuthLayout />}>
         <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/pending-approval" element={<PendingApproval />} />
       </Route>
 
       {/* Protected Admin Platform Routes */}

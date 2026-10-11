@@ -8,6 +8,7 @@ export const Input = forwardRef(function Input(
     helperText,
     iconLeft: IconLeft,
     iconRight: IconRight,
+    actionRight,
     className,
     containerClassName,
     id,
@@ -44,17 +45,19 @@ export const Input = forwardRef(function Input(
             'focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20',
             'disabled:bg-surface-50 disabled:text-surface-400 disabled:cursor-not-allowed',
             IconLeft && 'pl-9',
-            IconRight && 'pr-9',
+            (IconRight || actionRight) && 'pr-10',
             error && 'border-rose-400 focus:border-rose-500 focus:ring-rose-500/20 text-rose-900',
             className
           )}
           {...props}
         />
-        {IconRight && (
+        {actionRight ? (
+          <div className="absolute right-3 flex items-center z-10">{actionRight}</div>
+        ) : IconRight ? (
           <div className="absolute right-3 text-surface-400 pointer-events-none flex items-center">
             <IconRight className="w-4 h-4" />
           </div>
-        )}
+        ) : null}
       </div>
       {error && <p className="text-xs text-rose-600 font-medium">{error}</p>}
       {!error && helperText && <p className="text-xs text-surface-500">{helperText}</p>}

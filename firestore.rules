@@ -54,6 +54,22 @@ service cloud.firestore {
       allow write: if false; // Server-side admin SDK only
     }
 
+    // User Profiles:
+    // Any authenticated user can read their own profile; admins can read all profiles.
+    // Users can create their own profile document with role 'user' (never admin) and status 'pending'.
+    // Only verified admins can promote users or modify roles.
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow create: if isAuthenticated() && request.auth.uid == userId && (
+        request.resource.data.role == 'user' || isAdmin()
+      );
+      allow update: if isAdmin() || (
+        isAuthenticated() && request.auth.uid == userId &&
+        request.resource.data.role == resource.data.role
+      );
+      allow delete: if isAdmin() || (isAuthenticated() && request.auth.uid == userId);
+    }
+
     // Default deny for all other paths
     match /{document=**} {
       allow read, write: if false;

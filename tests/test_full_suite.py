@@ -313,10 +313,52 @@ def run_tests():
     assert r_del_check.status_code == 404, "Deleted vendor still returned!"
     print(f"[PASS] 17. DELETE /api/v1/vendors/{vendor_id} successfully purged record.")
 
+    # 18. Verification of Firebase Credential Parsing, Key Normalization & Auth Security
+    from app.config.firebase import normalize_private_key, parse_service_account_json
+
+    # Test key normalization with quotes and escaped newlines
+    sample_quoted_key = '"-----BEGIN PRIVATE KEY-----\\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC6\\n-----END PRIVATE KEY-----\\n"'
+    normalized_key = normalize_private_key(sample_quoted_key)
+    assert '\n' in normalized_key, "Newlines were not normalized"
+    assert normalized_key.startswith('-----BEGIN PRIVATE KEY-----\n')
+    assert normalized_key.endswith('-----END PRIVATE KEY-----\n')
+    assert not normalized_key.startswith('"')
+    assert not normalized_key.endswith('"')
+
+    # Test raw key without headers
+    raw_body = "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC6"
+    wrapped_key = normalize_private_key(raw_body)
+    assert wrapped_key.startswith('-----BEGIN PRIVATE KEY-----\n')
+    assert wrapped_key.endswith('-----END PRIVATE KEY-----\n')
+
+    # Test Service Account JSON parsing (raw, quoted, and base64)
+    sa_test_dict = {"type": "service_account", "project_id": "andhra-soft-tech-lead-finder", "client_email": "test@test.iam.gserviceaccount.com"}
+    raw_sa_str = json.dumps(sa_test_dict)
+    assert parse_service_account_json(raw_sa_str)["project_id"] == "andhra-soft-tech-lead-finder"
+    assert parse_service_account_json("'" + raw_sa_str + "'")["project_id"] == "andhra-soft-tech-lead-finder"
+
+    import base64
+    b64_sa = base64.b64encode(raw_sa_str.encode('utf-8')).decode('utf-8')
+    assert parse_service_account_json(b64_sa)["project_id"] == "andhra-soft-tech-lead-finder"
+
+    # Test non-admin authorization rejection (403 FORBIDDEN)
+    import base64
+    fake_header = base64.urlsafe_b64encode(json.dumps({"alg": "none"}).encode()).decode().rstrip('=')
+    non_admin_claims = base64.urlsafe_b64encode(json.dumps({"email": "unauthorized_user@gmail.com", "sub": "usr_999"}).encode()).decode().rstrip('=')
+    non_admin_jwt = f"{fake_header}.{non_admin_claims}.signature"
+    r_forbidden = client.get('/api/v1/dashboard/stats', headers={"Authorization": f"Bearer {non_admin_jwt}"})
+    assert r_forbidden.status_code in (401, 403), f"Expected 401 or 403 for non-admin user, got {r_forbidden.status_code}"
+    # Verify no secret or private key is in the response body
+    resp_text = r_forbidden.get_data(as_text=True)
+    assert "PRIVATE KEY" not in resp_text
+    assert "signature" not in resp_text
+    print("[PASS] 18. Firebase credential parsers, private key normalizer, and secure auth responses verified.")
+
     print("=" * 75)
-    print("ALL 17 VERIFICATION SUITE CHECKS COMPLETED SUCCESSFULLY!")
+    print("ALL 18 VERIFICATION SUITE CHECKS COMPLETED SUCCESSFULLY!")
     print("=" * 75)
 
 
 if __name__ == '__main__':
     run_tests()
+

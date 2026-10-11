@@ -5,7 +5,7 @@
 
 import axios from 'axios';
 import { API_CONFIG } from '../config/api';
-import { auth } from '../config/firebase';
+import { auth, isFirebaseConfigured } from '../config/firebase';
 
 export const apiClient = axios.create(API_CONFIG);
 
@@ -53,14 +53,23 @@ apiClient.interceptors.request.use(
         } catch (tokenErr) {
           console.warn('[ApiClient] Failed to retrieve fresh token from currentUser:', tokenErr);
         }
-      }
-
-      // Fallback to cached token in localStorage if currentUser is not yet available
-      if (!token) {
+      } else if (!isFirebaseConfigured || !auth) {
+        // Fallback to cached token only when running in offline/local mock dev mode without Firebase
         const stored = localStorage.getItem('ast_lead_finder_user');
         if (stored) {
-          const user = JSON.parse(stored);
-          token = user?.token;
+          try {
+            const user = JSON.parse(stored);
+            token = user?.token;
+          } catch {
+            // ignore
+          }
+        }
+      } else {
+        // Firebase is active, but currentUser is null (user is signed out)
+        // Clean up any stale user cache in localStorage so invalid tokens are not persisted
+        const stored = localStorage.getItem('ast_lead_finder_user');
+        if (stored) {
+          localStorage.removeItem('ast_lead_finder_user');
         }
       }
 
