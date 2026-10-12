@@ -5,7 +5,7 @@ GOOGLE PLACES API CONNECTOR (OFFICIAL GOOGLE MAPS PLATFORM)
 ==============================================================================
 Location: worker/collectors/connectors/google_places.py
 
-Integrates with the official Google Maps Platform Places API.
+Integrates with the official Google Maps Platform Places API (New).
 Reads server-side credentials only (never exposed to React client).
 Adheres strictly to Google Terms of Service, rate limits, and pagination quotas.
 ==============================================================================
@@ -21,11 +21,21 @@ from ..base_collector import BaseCollector
 class GooglePlacesConnector(BaseCollector):
     """
     Official Google Places API Connector for Google Maps Platform.
-    Utilizes Places Text Search and Details APIs with official pagination.
+    Utilizes Places API (New) Text Search with official field masks and pagination.
     """
 
-    PLACES_TEXT_SEARCH_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
-    PLACE_DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
+    # Official Google Places API (New) endpoints
+    PLACES_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
+    PLACES_NEW_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
+    PLACES_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
+    PLACE_DETAILS_URL = "https://places.googleapis.com/v1/places"
+
+    # Field mask requesting only the vendor attributes needed
+    DEFAULT_FIELD_MASK = (
+        "places.id,places.displayName,places.formattedAddress,places.rating,"
+        "places.userRatingCount,places.nationalPhoneNumber,places.internationalPhoneNumber,"
+        "places.websiteUri,places.types,nextPageToken"
+    )
 
     # Official Google Maps Platform quotas: Text Search delivers max 20 per page, up to 3 pages (60 max per query)
     MAX_PAGES_PER_QUERY = 3
@@ -41,6 +51,13 @@ class GooglePlacesConnector(BaseCollector):
     def get_api_key(self) -> str:
         if self._explicit_key:
             return self._explicit_key
+        try:
+            from app.config.settings import Settings
+            key = Settings.get_google_maps_api_key()
+            if key:
+                return key
+        except Exception:
+            pass
         try:
             from backend.app.config.settings import Settings
             key = Settings.get_google_maps_api_key()
@@ -89,7 +106,7 @@ class GooglePlacesConnector(BaseCollector):
             is_available = False
         else:
             status = "active"
-            message = "Google Maps Platform Places API is configured and operational."
+            message = "Google Maps Platform Places API (New) is configured and operational."
             is_available = True
 
         return {
@@ -103,11 +120,9 @@ class GooglePlacesConnector(BaseCollector):
             "message": message,
         }
 
-    PLACES_NEW_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
-
     def _fetch_place_details(self, place_id: str) -> Dict[str, Any]:
         """
-        Fetches detailed fields for a place ID using official field masks.
+        Fetches detailed fields for a place ID using Places API (New) Place Details.
         Adheres to polite rate limits and never logs the API key.
         """
         key = self.get_api_key()
@@ -115,128 +130,48 @@ class GooglePlacesConnector(BaseCollector):
             return {}
 
         self._request_counter += 1
+        headers = {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": key,
+            "X-Goog-FieldMask": (
+                "id,displayName,formattedAddress,rating,userRatingCount,"
+                "nationalPhoneNumber,internationalPhoneNumber,websiteUri,types"
+            )
+        }
+        url = f"{self.PLACE_DETAILS_URL.rstrip('/')}/{place_id}"
         try:
-            params = {
-                "place_id": place_id,
-                "fields": "place_id,name,formatted_phone_number,international_phone_number,website,formatted_address,address_components,rating,user_ratings_total,types",
-                "key": key
-            }
-            res = requests.get(self.PLACE_DETAILS_URL, params=params, timeout=10)
+            res = requests.get(url, headers=headers, timeout=10)
             if res.status_code == 200:
                 data = res.json()
-                if data.get('status') == 'OK':
-                    return data.get('result', {})
-                elif data.get('status') == 'OVER_QUERY_LIMIT':
-                    self._runtime_status = "quota_exceeded"
-                    self._runtime_message = "Google Places API quota exceeded during details request."
-                    self._safe_log("Warning: OVER_QUERY_LIMIT received during Place Details fetch.")
+                if 'result' in data:
+                    res_data = data.get('result', {})
+                    return {
+                        "formatted_phone_number": res_data.get('formatted_phone_number'),
+                        "international_phone_number": res_data.get('international_phone_number'),
+                        "website": res_data.get('website'),
+                        "formatted_address": res_data.get('formatted_address'),
+                        "name": res_data.get('name'),
+                        "rating": res_data.get('rating'),
+                        "user_ratings_total": res_data.get('user_ratings_total'),
+                    }
+                return {
+                    "formatted_phone_number": data.get('nationalPhoneNumber') or data.get('internationalPhoneNumber'),
+                    "international_phone_number": data.get('internationalPhoneNumber'),
+                    "website": data.get('websiteUri'),
+                    "formatted_address": data.get('formattedAddress'),
+                    "name": (data.get('displayName') or {}).get('text') if isinstance(data.get('displayName'), dict) else data.get('displayName'),
+                    "rating": data.get('rating'),
+                    "user_ratings_total": data.get('userRatingCount'),
+                }
+            elif res.status_code == 429:
+                self._runtime_status = "quota_exceeded"
+                self._runtime_message = "Google Places API quota exceeded during details request."
+                self._safe_log("Warning: Quota exceeded received during Place Details fetch.")
             else:
                 self._safe_log(f"Place Details HTTP {res.status_code} for place_id '{place_id}'.")
         except Exception as err:
             self._safe_log(f"Place details network notice: {err}")
         return {}
-
-    def _search_places_new(
-        self,
-        category: str,
-        location: str,
-        target_count: int,
-        should_stop: Optional[Callable[[], bool]] = None
-    ) -> Generator[Dict[str, Any], None, None]:
-        """
-        Executes search against Google Places API (New) Text Search endpoint.
-        Used seamlessly when Places API (New) is enabled on Google Cloud Platform.
-        """
-        key = self.get_api_key()
-        query = f"{category} in {location}"
-        yielded_count = 0
-        next_page_token = None
-        max_pages = min(self.MAX_PAGES_PER_QUERY, (target_count + self.MAX_RESULTS_PER_PAGE - 1) // self.MAX_RESULTS_PER_PAGE)
-
-        headers = {
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": key,
-            "X-Goog-FieldMask": (
-                "places.id,places.displayName,places.formattedAddress,places.rating,"
-                "places.userRatingCount,places.nationalPhoneNumber,places.internationalPhoneNumber,"
-                "places.websiteUri,places.types,nextPageToken"
-            )
-        }
-
-        self._safe_log(f"Executing Places API (New) searchText for query='{query}'...")
-
-        for page_idx in range(max_pages):
-            if should_stop and should_stop():
-                self._safe_log("Collection interrupted by stop condition.")
-                return
-
-            body = {
-                "textQuery": query,
-                "pageSize": min(20, max(1, target_count - yielded_count))
-            }
-            if next_page_token:
-                body["pageToken"] = next_page_token
-                time.sleep(1.5)
-
-            self._request_counter += 1
-            try:
-                res = requests.post(self.PLACES_NEW_SEARCH_URL, headers=headers, json=body, timeout=15)
-            except Exception as err:
-                raise RuntimeError(f"Network error contacting Google Places API (New): {err}")
-
-            if res.status_code != 200:
-                err_text = res.text
-                try:
-                    err_json = res.json()
-                    err_text = err_json.get('error', {}).get('message', err_text)
-                except Exception:
-                    pass
-                raise RuntimeError(f"Places API (New) responded with HTTP {res.status_code}: {err_text}")
-
-            data = res.json()
-            places = data.get('places', [])
-            self._safe_log(f"Places API (New) page {page_idx + 1}: Received {len(places)} results.")
-            if not places:
-                break
-
-            for p in places:
-                if should_stop and should_stop():
-                    return
-                if yielded_count >= target_count:
-                    return
-
-                pid = p.get('id', '')
-                display_name = (p.get('displayName') or {}).get('text', '').strip()
-                address = p.get('formattedAddress', '').strip()
-                phone = p.get('nationalPhoneNumber') or p.get('internationalPhoneNumber') or ''
-                website = p.get('websiteUri', '')
-                rating = float(p.get('rating', 0.0) or 0.0)
-                review_count = int(p.get('userRatingCount', 0) or 0)
-                city = location.split(',')[0].strip()
-
-                record = {
-                    "place_id": pid,
-                    "business_name": display_name,
-                    "category": category,
-                    "phone": phone,
-                    "address": address,
-                    "city": city,
-                    "state": "Andhra Pradesh",
-                    "rating": rating,
-                    "review_count": review_count,
-                    "website": website,
-                    "source": self.get_source_name(),
-                    "source_url": f"https://www.google.com/maps/place/?q=place_id:{pid}" if pid else "",
-                }
-
-                yield record
-                yielded_count += 1
-
-            next_page_token = data.get('nextPageToken')
-            if not next_page_token:
-                break
-
-        self._safe_log(f"Places API (New) search completed. Total records retrieved: {yielded_count}.")
 
     def search(
         self,
@@ -246,9 +181,10 @@ class GooglePlacesConnector(BaseCollector):
         should_stop: Optional[Callable[[], bool]] = None
     ) -> Generator[Dict[str, Any], None, None]:
         """
-        Executes verified search against Google Places API.
-        Respects Google's 20-results-per-page limit and page token activation delay.
-        Enforces realistic max quotas (up to 60 per single search query).
+        Executes verified search against Google Places API (New) Text Search endpoint:
+        POST https://places.googleapis.com/v1/places:searchText
+        Respects Google's 20-results-per-page limit and pagination tokens.
+        Enforces max quotas (up to 60 per single search query).
         """
         if not self.is_configured():
             self._runtime_status = "not_configured"
@@ -266,47 +202,106 @@ class GooglePlacesConnector(BaseCollector):
         yielded_count = 0
         next_page_token = None
 
-        # Google Places Text Search provides at most 3 pages (60 places) per query
+        # Google Places API Text Search delivers max 20 per page, up to 3 pages (60 max per query)
         max_pages = min(self.MAX_PAGES_PER_QUERY, (target_count + self.MAX_RESULTS_PER_PAGE - 1) // self.MAX_RESULTS_PER_PAGE)
         self._safe_log(
             f"Starting search: query='{query}', requested={target_count}, "
             f"planned_pages={max_pages} (max {self.MAX_RESULTS_PER_QUERY} per Google API query)"
         )
 
+        headers = {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": key,
+            "X-Goog-FieldMask": self.DEFAULT_FIELD_MASK
+        }
+
         for page_idx in range(max_pages):
             if should_stop and should_stop():
                 self._safe_log("Collection interrupted by stop condition.")
                 return
 
-            params = {
-                "query": query,
-                "key": key
+            page_size = min(self.MAX_RESULTS_PER_PAGE, max(1, target_count - yielded_count))
+            body: Dict[str, Any] = {
+                "textQuery": query,
+                "pageSize": page_size
             }
             if next_page_token:
-                params["pagetoken"] = next_page_token
-                # Google requires ~2.0 seconds delay before pagetoken becomes active
-                time.sleep(2.0)
+                body["pageToken"] = next_page_token
+                time.sleep(1.0)
 
             self._request_counter += 1
             try:
-                res = requests.get(self.PLACES_TEXT_SEARCH_URL, params=params, timeout=15)
+                res = requests.post(self.PLACES_SEARCH_URL, headers=headers, json=body, timeout=15)
             except Exception as err:
                 self._runtime_status = "error"
-                self._runtime_message = f"Network error contacting Google Places API: {err}"
-                raise RuntimeError(f"Network error contacting Google Places API: {err}")
+                self._runtime_message = f"Network error contacting Google Places API (New): {err}"
+                raise RuntimeError(f"Network error contacting Google Places API (New): {err}")
 
             if res.status_code != 200:
+                err_text = res.text
+                err_status = None
+                try:
+                    err_json = res.json()
+                    err_obj = err_json.get('error', {})
+                    if isinstance(err_obj, dict):
+                        err_text = err_obj.get('message', err_text)
+                        err_status = err_obj.get('status')
+                    elif 'message' in err_json:
+                        err_text = err_json.get('message')
+                except Exception:
+                    pass
+
+                err_lower = (err_text or '').lower()
+
+                # Quota exceeded / resource exhausted
+                if res.status_code == 429 or err_status == 'RESOURCE_EXHAUSTED' or 'quota' in err_lower or 'rate limit' in err_lower:
+                    self._runtime_status = "quota_exceeded"
+                    self._runtime_message = "Google Places API (New) quota exceeded or billing not enabled on Google Cloud Platform."
+                    self._safe_log("Google Places API error: QUOTA_EXCEEDED")
+                    raise RuntimeError("QUOTA_EXCEEDED: Google Places API quota exceeded or billing not enabled on Google Cloud project 'andhra-soft-tech-lead-finder'.")
+
+                # Permission denied / request denied / disabled / legacy API
+                if res.status_code == 403 or err_status == 'PERMISSION_DENIED' or 'denied' in err_lower or 'forbidden' in err_lower:
+                    if 'referer restrictions' in err_lower or 'referrer' in err_lower:
+                        actionable = (
+                            "API key has HTTP referrer restrictions preventing server-side API requests from Render. "
+                            "In Google Cloud Console > APIs & Services > Credentials, edit the API key and set Application restrictions to 'None' or 'IP addresses'."
+                        )
+                    elif 'billing' in err_lower:
+                        actionable = (
+                            "Billing is not enabled on Google Cloud project 'andhra-soft-tech-lead-finder'. "
+                            "Google Places API (New) requires an active billing account linked to the project in Google Cloud Console."
+                        )
+                    elif any(x in err_lower for x in ('not been used in project', 'is disabled', 'not authorized', 'legacy api')):
+                        actionable = (
+                            "Places API (New) is not enabled on Google Cloud project 'andhra-soft-tech-lead-finder'. "
+                            "Enable 'Places API (New)' under Google Cloud Console > APIs & Services > Library."
+                        )
+                    elif 'invalid' in err_lower or 'expired' in err_lower:
+                        actionable = "The GOOGLE_MAPS_API_KEY configured on Render is invalid. Verify the key in Google Cloud Console."
+                    else:
+                        actionable = err_text or "Request denied by Google Places API."
+
+                    self._runtime_status = "error"
+                    self._runtime_message = f"Google Places API request denied: {actionable}"
+                    self._safe_log(f"Google Places API error: REQUEST_DENIED: {actionable}")
+                    raise RuntimeError(f"REQUEST_DENIED: {actionable}")
+
+                # Invalid argument / bad request
+                if res.status_code == 400 or err_status == 'INVALID_ARGUMENT':
+                    self._runtime_status = "error"
+                    self._runtime_message = f"Invalid request to Google Places API (New): {err_text}"
+                    raise RuntimeError(f"INVALID_REQUEST: {err_text}")
+
                 self._runtime_status = "error"
-                self._runtime_message = f"Google Places API responded with HTTP {res.status_code}."
-                raise RuntimeError(f"Google Places API responded with HTTP {res.status_code}")
+                self._runtime_message = f"Google Places API (New) responded with HTTP {res.status_code}: {err_text}"
+                raise RuntimeError(f"Google Places API responded with HTTP {res.status_code}: {err_text}")
 
             payload = res.json()
-            status = payload.get('status')
 
-            if status == 'ZERO_RESULTS':
-                self._safe_log(f"Page {page_idx + 1}: ZERO_RESULTS returned for query: '{query}'")
-                break
-            elif status == 'OVER_QUERY_LIMIT':
+            # Handle payload status field if present (legacy error status translation)
+            status = payload.get('status')
+            if status == 'OVER_QUERY_LIMIT':
                 self._runtime_status = "quota_exceeded"
                 self._runtime_message = "Google Places API quota exceeded or billing not enabled on Google Cloud Platform."
                 self._safe_log("Google Places API error: OVER_QUERY_LIMIT")
@@ -314,80 +309,65 @@ class GooglePlacesConnector(BaseCollector):
             elif status == 'REQUEST_DENIED':
                 error_msg = payload.get('error_message', 'Request denied by Google Places API. Check API key permissions.')
                 self._safe_log(f"Google Places API error: REQUEST_DENIED: {error_msg}")
-
-                # If legacy Places API is disabled or not used, try Places API (New)
-                if any(x in error_msg.lower() for x in ('not been used in project', 'is disabled', 'not authorized to use this api')):
-                    self._safe_log("Places API Web Service is disabled on project; attempting Places API (New)...")
-                    try:
-                        for record in self._search_places_new(category, location, target_count, should_stop=should_stop):
-                            yield record
-                            yielded_count += 1
-                        return
-                    except Exception as new_err:
-                        self._safe_log(f"Places API (New) also failed: {new_err}")
-
-                # Format actionable diagnostic
-                actionable = error_msg
-                if 'referer restrictions' in error_msg.lower():
+                msg_lower = error_msg.lower()
+                if 'referer restrictions' in msg_lower or 'referrer' in msg_lower:
                     actionable = (
                         "API key has HTTP referrer restrictions preventing server-side API requests from Render. "
                         "In Google Cloud Console > APIs & Services > Credentials, edit the API key and set Application restrictions to 'None' or 'IP addresses'."
                     )
-                elif 'not been used in project' in error_msg.lower() or 'is disabled' in error_msg.lower():
-                    actionable = (
-                        "Places API is disabled on Google Cloud project 'andhra-soft-tech-lead-finder'. "
-                        "Enable 'Places API' or 'Places API (New)' under Google Cloud Console > APIs & Services > Library."
-                    )
-                elif 'invalid' in error_msg.lower():
+                elif 'billing' in msg_lower:
+                    actionable = "Billing is not enabled on Google Cloud project 'andhra-soft-tech-lead-finder'. Google Places API (New) requires an active billing account linked to the project in Google Cloud Console."
+                elif any(x in msg_lower for x in ('not been used in project', 'is disabled', 'not authorized', 'legacy api')):
+                    actionable = "Places API (New) is not enabled on Google Cloud project 'andhra-soft-tech-lead-finder'. Enable 'Places API (New)' under Google Cloud Console > APIs & Services > Library."
+                elif 'invalid' in msg_lower or 'expired' in msg_lower:
                     actionable = "The GOOGLE_MAPS_API_KEY configured on Render is invalid. Verify the key in Google Cloud Console."
+                else:
+                    actionable = error_msg
 
                 self._runtime_status = "error"
                 self._runtime_message = f"Google Places API request denied: {actionable}"
                 raise RuntimeError(f"REQUEST_DENIED: {actionable}")
-
-            elif status == 'INVALID_REQUEST':
-                # Can occur if pagetoken is accessed too rapidly; retry once with backoff
-                if next_page_token:
-                    self._safe_log("INVALID_REQUEST on page token; retrying with backoff...")
-                    time.sleep(2.5)
-                    self._request_counter += 1
-                    retry_res = requests.get(self.PLACES_TEXT_SEARCH_URL, params=params, timeout=15)
-                    if retry_res.status_code == 200 and retry_res.json().get('status') == 'OK':
-                        payload = retry_res.json()
-                    else:
-                        break
-                else:
-                    break
-            elif status != 'OK':
-                self._runtime_status = "error"
-                self._runtime_message = f"Google Places API returned status: {status}"
-                raise RuntimeError(f"Google Places API returned unexpected status: {status} ({payload.get('error_message', '')})")
-
-            results = payload.get('results', [])
-            self._safe_log(f"Page {page_idx + 1}: Received {len(results)} results from Google Places.")
-            if not results:
+            elif status == 'ZERO_RESULTS':
+                self._safe_log(f"Page {page_idx + 1}: ZERO_RESULTS returned for query: '{query}'")
                 break
 
-            for place in results:
+            # Places API (New) places list; fallback to results if legacy mock provided
+            places = payload.get('places', [])
+            if not places and 'results' in payload:
+                places = payload.get('results', [])
+
+            self._safe_log(f"Page {page_idx + 1}: Received {len(places)} results from Google Places.")
+            if not places:
+                break
+
+            for place in places:
                 if should_stop and should_stop():
+                    self._safe_log("Collection interrupted by stop condition.")
                     return
                 if yielded_count >= target_count:
                     return
 
-                place_id = place.get('place_id', '')
-                business_name = place.get('name', '').strip()
-                address = place.get('formatted_address', '').strip()
-                rating = float(place.get('rating', 0.0) or 0.0)
-                review_count = int(place.get('user_ratings_total', 0) or 0)
+                # Support both Places API (New) structure and legacy structure
+                place_id = place.get('id', '') or place.get('place_id', '')
 
-                # Fetch extra details (phone, website)
-                phone = ''
-                website = ''
-                if place_id:
-                    details = self._fetch_place_details(place_id)
-                    phone = details.get('formatted_phone_number') or details.get('international_phone_number') or ''
-                    website = details.get('website', '')
-                    time.sleep(0.12)  # Polite QPS spacing
+                raw_name = place.get('displayName')
+                if isinstance(raw_name, dict):
+                    business_name = (raw_name.get('text') or '').strip()
+                elif raw_name:
+                    business_name = str(raw_name).strip()
+                else:
+                    business_name = (place.get('name') or '').strip()
+
+                address = (place.get('formattedAddress') or place.get('formatted_address') or '').strip()
+                phone = (
+                    place.get('nationalPhoneNumber') or
+                    place.get('internationalPhoneNumber') or
+                    place.get('formatted_phone_number') or
+                    ''
+                )
+                website = place.get('websiteUri') or place.get('website') or ''
+                rating = float(place.get('rating', 0.0) or 0.0)
+                review_count = int(place.get('userRatingCount') or place.get('user_ratings_total') or 0)
 
                 # City heuristics from location or address
                 city = location.split(',')[0].strip()
@@ -410,8 +390,18 @@ class GooglePlacesConnector(BaseCollector):
                 yield record
                 yielded_count += 1
 
-            next_page_token = payload.get('next_page_token')
+            next_page_token = payload.get('nextPageToken') or payload.get('next_page_token')
             if not next_page_token:
                 break
 
         self._safe_log(f"Search completed. Total records retrieved: {yielded_count}.")
+
+    def _search_places_new(
+        self,
+        category: str,
+        location: str,
+        target_count: int,
+        should_stop: Optional[Callable[[], bool]] = None
+    ) -> Generator[Dict[str, Any], None, None]:
+        """Alias for search() which natively uses Places API (New)."""
+        return self.search(category, location, target_count, should_stop=should_stop)

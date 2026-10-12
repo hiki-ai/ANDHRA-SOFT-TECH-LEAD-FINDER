@@ -285,18 +285,24 @@ def run_tests():
     except RuntimeError as e:
         print("[PASS] 13c. Connector runtime checks enforce NOT_CONFIGURED and AUTHORIZATION_REQUIRED guards.")
 
-    # 13d. Test Google Places API error handling and status translations
+    # 13d. Test Google Places API (New) error handling and status translations
     from unittest.mock import patch, MagicMock
 
     mock_gp = GooglePlacesConnector(api_key="AIzaSyValidDummyKeyForTest123456")
     assert mock_gp.is_configured() is True
 
-    # 1. OVER_QUERY_LIMIT test
-    with patch('requests.get') as mock_get:
+    # 1. Quota Exceeded (HTTP 429 / RESOURCE_EXHAUSTED) test
+    with patch('requests.post') as mock_post:
         mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"status": "OVER_QUERY_LIMIT", "results": []}
-        mock_get.return_value = mock_resp
+        mock_resp.status_code = 429
+        mock_resp.json.return_value = {
+            "error": {
+                "code": 429,
+                "message": "Quota exceeded for quota metric 'Queries' of service 'places.googleapis.com'",
+                "status": "RESOURCE_EXHAUSTED"
+            }
+        }
+        mock_post.return_value = mock_resp
 
         try:
             list(mock_gp.search("Hotels", "Rajahmundry", 10))
@@ -305,15 +311,18 @@ def run_tests():
             assert "QUOTA_EXCEEDED" in str(e)
             assert mock_gp.get_status()['status'] == 'quota_exceeded'
 
-    # 2. REQUEST_DENIED with referer restriction test
-    with patch('requests.get') as mock_get:
+    # 2. REQUEST_DENIED with referer restriction test (HTTP 403)
+    with patch('requests.post') as mock_post:
         mock_resp = MagicMock()
-        mock_resp.status_code = 200
+        mock_resp.status_code = 403
         mock_resp.json.return_value = {
-            "status": "REQUEST_DENIED",
-            "error_message": "API keys with referer restrictions cannot be used with this API."
+            "error": {
+                "code": 403,
+                "message": "API keys with referer restrictions cannot be used with this API.",
+                "status": "PERMISSION_DENIED"
+            }
         }
-        mock_get.return_value = mock_resp
+        mock_post.return_value = mock_resp
 
         try:
             list(mock_gp.search("Hotels", "Rajahmundry", 10))
@@ -322,48 +331,63 @@ def run_tests():
             assert "REQUEST_DENIED" in str(e)
             assert "referrer" in str(e).lower() or "referer" in str(e).lower()
 
-    # 3. ZERO_RESULTS test (empty search returns 0 without raising)
-    with patch('requests.get') as mock_get:
+    # 3. REQUEST_DENIED with legacy API / disabled API diagnostic test
+    with patch('requests.post') as mock_post:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 403
+        mock_resp.json.return_value = {
+            "error": {
+                "code": 403,
+                "message": "You're calling a legacy API, which is not enabled for your project.",
+                "status": "PERMISSION_DENIED"
+            }
+        }
+        mock_post.return_value = mock_resp
+
+        try:
+            list(mock_gp.search("Hotels", "Rajahmundry", 10))
+            assert False, "Should have raised request denied"
+        except RuntimeError as e:
+            assert "REQUEST_DENIED" in str(e)
+            assert "places api (new)" in str(e).lower()
+
+    # 4. Empty search results (zero results returns empty list without raising)
+    with patch('requests.post') as mock_post:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.json.return_value = {"status": "ZERO_RESULTS", "results": []}
-        mock_get.return_value = mock_resp
+        mock_resp.json.return_value = {"places": []}
+        mock_post.return_value = mock_resp
 
         zero_res = list(mock_gp.search("Underwater Igloos", "Rajahmundry", 10))
         assert len(zero_res) == 0
 
-    print("[PASS] 13d. Google Places API error paths (OVER_QUERY_LIMIT, REQUEST_DENIED, ZERO_RESULTS) verified.")
+    print("[PASS] 13d. Google Places API (New) error paths (QUOTA_EXCEEDED, REQUEST_DENIED, ZERO_RESULTS) verified.")
 
-    # 13e. Test Google Places API successful mock response & Details field resolution
-    with patch('requests.get') as mock_get:
-        def side_effect_fn(url, params, timeout=10):
-            mock_res = MagicMock()
-            mock_res.status_code = 200
-            if "details" in url:
-                mock_res.json.return_value = {
-                    "status": "OK",
-                    "result": {
-                        "formatted_phone_number": "0883 244 5678",
-                        "website": "https://hotelriverview.com"
-                    }
+    # 13e. Test Google Places API (New) POST searchText response and field mapping
+    with patch('requests.post') as mock_post:
+        mock_res = MagicMock()
+        mock_res.status_code = 200
+        mock_res.json.return_value = {
+            "places": [
+                {
+                    "id": "ChIJ_rajahmundry_1",
+                    "displayName": {
+                        "text": "Hotel River View",
+                        "languageCode": "en"
+                    },
+                    "formattedAddress": "Danavaipeta, Rajahmundry, Andhra Pradesh 533103",
+                    "rating": 4.3,
+                    "userRatingCount": 512,
+                    "nationalPhoneNumber": "0883 244 5678",
+                    "internationalPhoneNumber": "+91 883 244 5678",
+                    "websiteUri": "https://hotelriverview.com",
+                    "types": ["hotel", "lodging"]
                 }
-            else:
-                mock_res.json.return_value = {
-                    "status": "OK",
-                    "results": [
-                        {
-                            "place_id": "ChIJ_rajahmundry_1",
-                            "name": "Hotel River View",
-                            "formatted_address": "Danavaipeta, Rajahmundry, Andhra Pradesh 533103",
-                            "rating": 4.3,
-                            "user_ratings_total": 512,
-                        }
-                    ],
-                    "next_page_token": None
-                }
-            return mock_res
+            ],
+            "nextPageToken": None
+        }
+        mock_post.return_value = mock_res
 
-        mock_get.side_effect = side_effect_fn
         places = list(mock_gp.search("Hotels", "Rajahmundry", 5))
         assert len(places) == 1
         p = places[0]
@@ -375,7 +399,37 @@ def run_tests():
         assert p['city'] == "Rajahmundry"
         assert p['source'] == "Google Maps / Google Places API"
 
-    print("[PASS] 13e. Google Places API successful extraction and details parsing verified.")
+        # Verify Google Places API (New) contract: POST endpoint, headers, and body
+        mock_post.assert_called_once()
+        call_url = mock_post.call_args[0][0]
+        call_kwargs = mock_post.call_args[1]
+        assert call_url == "https://places.googleapis.com/v1/places:searchText"
+        headers_sent = call_kwargs.get('headers', {})
+        assert headers_sent.get('Content-Type') == 'application/json'
+        assert headers_sent.get('X-Goog-Api-Key') == 'AIzaSyValidDummyKeyForTest123456'
+        assert 'X-Goog-FieldMask' in headers_sent
+        assert 'places.displayName' in headers_sent['X-Goog-FieldMask']
+        assert 'places.formattedAddress' in headers_sent['X-Goog-FieldMask']
+        body_sent = call_kwargs.get('json', {})
+        assert body_sent.get('textQuery') == 'Hotels in Rajahmundry'
+        assert body_sent.get('pageSize') == 5
+
+    # 13e-2. Test Place Details (New) endpoint resolution
+    with patch('requests.get') as mock_get:
+        mock_detail_res = MagicMock()
+        mock_detail_res.status_code = 200
+        mock_detail_res.json.return_value = {
+            "id": "ChIJ_rajahmundry_1",
+            "displayName": {"text": "Hotel River View"},
+            "nationalPhoneNumber": "0883 244 5678",
+            "websiteUri": "https://hotelriverview.com"
+        }
+        mock_get.return_value = mock_detail_res
+        detail_data = mock_gp._fetch_place_details("ChIJ_rajahmundry_1")
+        assert detail_data.get('formatted_phone_number') == "0883 244 5678"
+        assert detail_data.get('website') == "https://hotelriverview.com"
+
+    print("[PASS] 13e. Google Places API (New) searchText POST extraction, field mapping, and details verified.")
 
     # 13f. Test deduplication and telemetry count persistence in CollectionWorker
     from processors.deduplicator import RecordDeduplicator
