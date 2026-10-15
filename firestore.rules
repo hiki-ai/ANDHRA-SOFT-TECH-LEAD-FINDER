@@ -40,6 +40,12 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Table Presets: Read & write allowed for authenticated users
+    match /tablePresets/{presetId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
     // Import/Export Jobs: Admin only
     match /importJobs/{jobId} {
       allow read, write: if isAdmin();

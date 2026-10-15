@@ -44,7 +44,9 @@ class CollectionWorker:
         category: str,
         location: str,
         target_count: int = 1000,
-        source: str = "google_places"
+        source: str = "google_places",
+        preset_id: Optional[str] = None,
+        preset_columns: Optional[list] = None
     ):
         """
         Processes a real lead collection job lifecycle:
@@ -64,6 +66,17 @@ class CollectionWorker:
             except Exception:
                 pass
             return False
+
+        # Load preset snapshot from Firestore job document if not passed directly
+        if (not preset_id or not preset_columns) and db is not None:
+            try:
+                c_doc = db.collection('collections').document(job_id).get()
+                if c_doc and c_doc.to_dict():
+                    cd = c_doc.to_dict()
+                    preset_id = preset_id or cd.get('preset_id')
+                    preset_columns = preset_columns or cd.get('preset_columns')
+            except Exception as e:
+                print(f"[CollectionWorker] Preset snapshot preload notice: {e}")
 
         # 1. Resolve source connector
         try:
@@ -87,6 +100,8 @@ class CollectionWorker:
             "source": source,
             "source_name": connector.get_source_name(),
             "current_source": connector.get_source_name(),
+            "preset_id": preset_id,
+            "preset_columns": preset_columns,
             "updated_at": now_iso,
         })
 
@@ -108,6 +123,13 @@ class CollectionWorker:
         valid_count = 0
         duplicate_count = 0
         failed_count = 0
+
+        # Build custom fields template if custom columns are configured in preset
+        custom_fields_template = {}
+        if preset_columns and isinstance(preset_columns, list):
+            for col in preset_columns:
+                if col.get('is_custom'):
+                    custom_fields_template[col['key']] = ""
 
         try:
             for raw_record in connector.search(category, location, target_count, should_stop=should_stop):
@@ -148,14 +170,19 @@ class CollectionWorker:
                     "city": city,
                     "state": normalized.get('state', 'Andhra Pradesh'),
                     "website": normalized.get('website', ''),
+                    "email": normalized.get('email', ''),
                     "rating": float(normalized.get('rating', 0.0) or 0.0),
                     "review_count": int(normalized.get('review_count', 0) or 0),
                     "source": connector.get_source_name(),
+                    "source_id": raw_record.get('place_id') or raw_record.get('id', ''),
+                    "place_id": raw_record.get('place_id') or raw_record.get('id', ''),
                     "source_url": normalized.get('source_url', ''),
                     "status": status,
                     "data_quality_score": quality_score,
                     "dedupe_key": dedupe_key,
                     "collection_id": job_id,
+                    "preset_id": preset_id,
+                    "custom_fields": dict(custom_fields_template),
                     "created_at": datetime.now(timezone.utc).isoformat(),
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }

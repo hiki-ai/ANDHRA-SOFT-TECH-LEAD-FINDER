@@ -24,10 +24,12 @@ import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { Input } from '../components/common/Input';
 import { Select } from '../components/common/Select';
+import { Modal } from '../components/common/Modal';
 import { formatNumber, formatPercent, getQualityScoreColor } from '../utils/formatters';
 import { useToast } from '../context/ToastContext';
 import { vendorService } from '../services/vendorService';
 import { exportService } from '../services/exportService';
+import { presetService } from '../services/presetService';
 
 export function Vendors() {
   const [vendorsList, setVendorsList] = useState([]);
@@ -35,6 +37,13 @@ export function Vendors() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState(null);
+
+  // Preset Export Modal states
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [presets, setPresets] = useState([]);
+  const [selectedPresetId, setSelectedPresetId] = useState('preset_furniture_leads');
+  const [exportFormat, setExportFormat] = useState('xlsx');
+  const [exportAll, setExportAll] = useState(true);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
@@ -95,18 +104,43 @@ export function Vendors() {
     setPage(1);
   };
 
-  const handleExport = async () => {
+  // Load saved presets on mount
+  useEffect(() => {
+    presetService.getPresets()
+      .then((res) => {
+        const list = res?.data || res || [];
+        setPresets(Array.isArray(list) ? list : []);
+        const furn = list.find((p) => p.id === 'preset_furniture_leads' || p.name === 'Furniture Leads');
+        if (furn) {
+          setSelectedPresetId(furn.id);
+        } else if (list.length > 0) {
+          setSelectedPresetId(list[0].id);
+        }
+      })
+      .catch((err) => {
+        console.warn('[Vendors] Could not load presets:', err);
+      });
+  }, []);
+
+  const handleOpenExportModal = () => {
+    setShowExportModal(true);
+  };
+
+  const handleExecuteExport = async () => {
     setExporting(true);
     try {
-      toast.info('Generating real Excel export from Cloud Firestore...');
+      toast.info('Generating spreadsheet export from Cloud Firestore...');
       const res = await exportService.downloadDirectly({
+        preset_id: selectedPresetId,
         category: selectedCategory || undefined,
         city: selectedLocation || undefined,
         status: selectedStatus || undefined,
         search: searchTerm.trim() || undefined,
-        format: 'xlsx',
+        format: exportFormat,
+        export_all: exportAll,
       });
-      toast.success(`Excel file downloaded (${res?.row_count ?? vendorsList.length} records).`);
+      toast.success(`Spreadsheet downloaded (${res?.row_count ?? vendorsList.length} records).`);
+      setShowExportModal(false);
     } catch (err) {
       console.error('[Vendors] Export failed:', err);
       toast.error(err?.message || 'Failed to generate Excel export.');
@@ -114,6 +148,9 @@ export function Vendors() {
       setExporting(false);
     }
   };
+
+  const activeExportPreset = presets.find((p) => p.id === selectedPresetId) || presets[0] || null;
+  const activeExportColumns = activeExportPreset?.columns?.filter((c) => c.is_enabled) || [];
 
   const startRecord = pagination.total > 0 ? (pagination.page - 1) * pagination.limit + 1 : 0;
   const endRecord = pagination.total > 0 ? Math.min(pagination.page * pagination.limit, pagination.total) : 0;
@@ -142,10 +179,15 @@ export function Vendors() {
             size="sm"
             iconLeft={Download}
             loading={exporting}
-            onClick={handleExport}
+            onClick={handleOpenExportModal}
           >
             Export Excel
           </Button>
+          <Link to="/table-editor">
+            <Button variant="outline" size="sm">
+              Table Editor
+            </Button>
+          </Link>
           <Link to="/data-editor">
             <Button variant="primary" size="sm">
               Open Spreadsheet Editor
@@ -377,6 +419,132 @@ export function Vendors() {
           </div>
         </div>
       </div>
+
+      {/* Export Options Modal */}
+      <Modal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        title="Export Vendor Leads"
+        subtitle="Export vendor records to Excel or CSV using your configured table column presets."
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          {/* Preset Selector */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-surface-700 tracking-wide uppercase">
+              Table Column Preset
+            </label>
+            <Select
+              value={selectedPresetId}
+              onChange={(e) => setSelectedPresetId(e.target.value)}
+              options={presets.map((p) => ({
+                value: p.id,
+                label: `${p.name}${p.is_default ? ' (Default)' : p.is_system ? ' (System)' : ''}`,
+              }))}
+              helperText="Determines the exact headers and column order in the downloaded spreadsheet."
+            />
+          </div>
+
+          {/* Columns preview */}
+          {activeExportColumns.length > 0 && (
+            <div className="p-3 bg-surface-50 rounded-xl border border-surface-200 space-y-1.5">
+              <span className="text-[11px] font-semibold text-surface-600 block">
+                Exported Column Order ({activeExportColumns.length} columns):
+              </span>
+              <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                {activeExportColumns.map((col, idx) => (
+                  <span
+                    key={col.key}
+                    className="inline-flex items-center gap-1 text-[11px] bg-white border border-surface-200 px-2 py-0.5 rounded-md text-surface-700 shadow-sm"
+                  >
+                    <span className="text-surface-400 font-mono text-[10px]">#{idx + 1}</span>
+                    <span className="font-medium">{col.label}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Export Scope */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-surface-700 tracking-wide uppercase">
+              Export Scope
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label
+                className={cn(
+                  'p-3 rounded-xl border text-xs font-medium cursor-pointer transition-all flex flex-col gap-1',
+                  exportAll
+                    ? 'bg-brand-50 border-brand-300 text-brand-900 ring-2 ring-brand-500/20'
+                    : 'bg-white border-surface-200 text-surface-700 hover:bg-surface-50'
+                )}
+              >
+                <input
+                  type="radio"
+                  name="exportScope"
+                  checked={exportAll}
+                  onChange={() => setExportAll(true)}
+                  className="sr-only"
+                />
+                <span className="font-bold">Export All Matching Records</span>
+                <span className="text-[11px] text-surface-500">
+                  {pagination.total > 0 ? `${pagination.total} total matching leads` : 'All database records'}
+                </span>
+              </label>
+
+              <label
+                className={cn(
+                  'p-3 rounded-xl border text-xs font-medium cursor-pointer transition-all flex flex-col gap-1',
+                  !exportAll
+                    ? 'bg-brand-50 border-brand-300 text-brand-900 ring-2 ring-brand-500/20'
+                    : 'bg-white border-surface-200 text-surface-700 hover:bg-surface-50'
+                )}
+              >
+                <input
+                  type="radio"
+                  name="exportScope"
+                  checked={!exportAll}
+                  onChange={() => setExportAll(false)}
+                  className="sr-only"
+                />
+                <span className="font-bold">Current Page Only</span>
+                <span className="text-[11px] text-surface-500">
+                  Up to {vendorsList.length} visible leads (Page {pagination.page})
+                </span>
+              </label>
+            </div>
+          </div>
+
+          {/* File Format */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-surface-700 tracking-wide uppercase">
+              Spreadsheet Format
+            </label>
+            <Select
+              value={exportFormat}
+              onChange={(e) => setExportFormat(e.target.value)}
+              options={[
+                { value: 'xlsx', label: 'Microsoft Excel (.xlsx)' },
+                { value: 'csv', label: 'Comma-Separated Values (.csv)' },
+              ]}
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-surface-100">
+            <Button variant="outline" onClick={() => setShowExportModal(false)} disabled={exporting}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              iconLeft={Download}
+              isLoading={exporting}
+              onClick={handleExecuteExport}
+            >
+              Download {exportFormat.toUpperCase()}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

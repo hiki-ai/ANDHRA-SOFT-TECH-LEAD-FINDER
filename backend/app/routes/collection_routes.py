@@ -67,6 +67,7 @@ def create_collection():
     location = payload.get('location')
     target_count = int(payload.get('target_count', 1000))
     source = (payload.get('source') or 'google_places').strip().lower()
+    preset_id = (payload.get('preset_id') or 'preset_furniture_leads').strip()
 
     if not category or not location:
         return jsonify({"success": False, "error": {"code": "VALIDATION_ERROR", "message": "Category and location are required"}}), 400
@@ -74,6 +75,23 @@ def create_collection():
     db = get_firestore_db()
     job_id = f"col_{int(time.time() * 1000)}"
     now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Resolve preset schema and snapshot
+    from ..models.table_preset import INITIAL_PRESETS, build_furniture_leads_columns
+    preset_doc = db.collection('tablePresets').document(preset_id).get()
+    preset_data = preset_doc.to_dict() if preset_doc and getattr(preset_doc, 'exists', True) else None
+
+    if not preset_data:
+        # Match against initial presets or fallback to Furniture Leads
+        matched = next((p for p in INITIAL_PRESETS if p['id'] == preset_id), None)
+        preset_data = matched or INITIAL_PRESETS[0]
+        preset_id = preset_data['id']
+
+    preset_name = preset_data.get('name', 'Furniture Leads')
+    # Use client provided column snapshot if valid, otherwise derive enabled columns from preset
+    preset_columns = payload.get('preset_columns')
+    if not preset_columns or not isinstance(preset_columns, list):
+        preset_columns = [c for c in preset_data.get('columns', []) if c.get('is_enabled', True)]
 
     # Resolve connector and check availability
     import sys
@@ -100,6 +118,58 @@ def create_collection():
     except Exception as e:
         connector_error = f"Source manager error: {str(e)}"
 
+    # Audit source capabilities against required columns of the preset
+    try:
+        from collectors.source_capabilities import check_source_capabilities
+        cap_audit = check_source_capabilities(source, preset_columns)
+        if not cap_audit.get('is_valid', True):
+            blocking = cap_audit.get('blocking_errors', [])
+            return jsonify({
+                "success": False,
+                "error": {
+                    "code": "UNSUPPORTED_REQUIRED_COLUMN",
+                    "message": "; ".join(blocking) if blocking else "Required columns are not supported by the selected source.",
+                    "details": blocking,
+                }
+            }), 400
+    except Exception as cap_err:
+        print(f"[CollectionRoutes] Capability audit notice: {cap_err}")
+
+    # If connector is not configured, do not start worker; return clear failure state (201)
+    if not connector_ready:
+        job_doc = {
+            "id": job_id,
+            "category": category,
+            "location": location,
+            "target_count": target_count,
+            "source": source,
+            "source_name": source_name,
+            "current_source": source_name,
+            "preset_id": preset_id,
+            "preset_name": preset_name,
+            "preset_columns": preset_columns,
+            "found": 0,
+            "found_count": 0,
+            "valid": 0,
+            "valid_count": 0,
+            "duplicate": 0,
+            "duplicate_count": 0,
+            "failed": 0,
+            "failed_count": 0,
+            "progress": 0,
+            "status": "failed",
+            "error_message": connector_error,
+            "started_at": now_iso,
+            "completed_at": now_iso,
+            "updated_at": now_iso,
+        }
+        db.collection('collections').document(job_id).set(job_doc)
+        return jsonify({
+            "success": True,
+            "data": job_doc,
+            "message": f"Job created but marked failed: {connector_error}"
+        }), 201
+
     job_doc = {
         "id": job_id,
         "category": category,
@@ -108,6 +178,9 @@ def create_collection():
         "source": source,
         "source_name": source_name,
         "current_source": source_name,
+        "preset_id": preset_id,
+        "preset_name": preset_name,
+        "preset_columns": preset_columns,
         "found": 0,
         "found_count": 0,
         "valid": 0,
@@ -117,22 +190,14 @@ def create_collection():
         "failed": 0,
         "failed_count": 0,
         "progress": 0,
-        "status": "pending" if connector_ready else "failed",
-        "error_message": None if connector_ready else connector_error,
+        "status": "pending",
+        "error_message": None,
         "started_at": now_iso,
-        "completed_at": None if connector_ready else now_iso,
+        "completed_at": None,
         "updated_at": now_iso,
     }
 
     db.collection('collections').document(job_id).set(job_doc)
-
-    # If connector is not configured, do not start worker; return clear failure state
-    if not connector_ready:
-        return jsonify({
-            "success": True,
-            "data": job_doc,
-            "message": f"Job created but marked failed: {connector_error}"
-        }), 201
 
     # Dispatch to worker service if WORKER_URL is configured, else execute via daemon thread
     if Settings.WORKER_URL:
@@ -148,6 +213,8 @@ def create_collection():
                     "location": location,
                     "target_count": target_count,
                     "source": source,
+                    "preset_id": preset_id,
+                    "preset_columns": preset_columns,
                 },
                 timeout=5
             )
@@ -158,7 +225,15 @@ def create_collection():
             try:
                 from services.collection_worker import CollectionWorker
                 worker = CollectionWorker(db=db)
-                worker.process_job(job_id, category, location, target_count, source=source)
+                worker.process_job(
+                    job_id,
+                    category,
+                    location,
+                    target_count,
+                    source=source,
+                    preset_id=preset_id,
+                    preset_columns=preset_columns
+                )
             except Exception as thread_err:
                 print(f"[CollectionRoutes] Worker thread execution error: {thread_err}")
                 now_fail_iso = datetime.now(timezone.utc).isoformat()

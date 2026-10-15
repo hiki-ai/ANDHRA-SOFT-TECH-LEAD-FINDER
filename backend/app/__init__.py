@@ -19,6 +19,7 @@ from .routes.import_routes import import_bp
 from .routes.export_routes import export_bp
 from .routes.column_routes import column_bp
 from .routes.source_routes import source_bp
+from .routes.preset_routes import preset_bp
 
 def create_app(config_name=None):
     app = Flask(__name__)
@@ -81,6 +82,7 @@ def create_app(config_name=None):
     app.register_blueprint(export_bp)
     app.register_blueprint(column_bp)
     app.register_blueprint(source_bp)
+    app.register_blueprint(preset_bp)
 
     # Register un-prefixed aliases for maximum resilience
     app.register_blueprint(auth_bp, name='auth_alias', url_prefix='/auth')
@@ -91,6 +93,7 @@ def create_app(config_name=None):
     app.register_blueprint(export_bp, name='exports_alias', url_prefix='/exports')
     app.register_blueprint(column_bp, name='columns_alias', url_prefix='/columns')
     app.register_blueprint(source_bp, name='sources_alias', url_prefix='/sources')
+    app.register_blueprint(preset_bp, name='presets_alias', url_prefix='/presets')
 
     def _health_response():
         live_db = is_live_firestore()

@@ -31,17 +31,50 @@ def create_export():
     city = payload.get('city')
     status = payload.get('status')
     search = payload.get('search')
+    collection_id = payload.get('collection_id')
+    preset_id = payload.get('preset_id')
     export_format = payload.get('format', 'xlsx').lower()
 
     db = get_firestore_db()
-    col_ref = db.collection('vendors')
 
+    # Determine column schema configuration from collection snapshot or preset
+    active_columns = None
+
+    if collection_id:
+        c_doc = db.collection('collections').document(collection_id).get()
+        if c_doc and getattr(c_doc, 'exists', True) and c_doc.to_dict():
+            c_data = c_doc.to_dict()
+            if c_data.get('preset_columns') and isinstance(c_data['preset_columns'], list):
+                active_columns = [c for c in c_data['preset_columns'] if c.get('is_enabled', True)]
+            elif c_data.get('preset_id'):
+                preset_id = preset_id or c_data['preset_id']
+
+    if not active_columns and preset_id:
+        p_doc = db.collection('tablePresets').document(preset_id).get()
+        if p_doc and getattr(p_doc, 'exists', True) and p_doc.to_dict():
+            p_data = p_doc.to_dict()
+            active_columns = [c for c in p_data.get('columns', []) if c.get('is_enabled', True)]
+        else:
+            from ..models.table_preset import INITIAL_PRESETS
+            matched = next((p for p in INITIAL_PRESETS if p['id'] == preset_id), None)
+            if matched:
+                active_columns = [c for c in matched['columns'] if c.get('is_enabled', True)]
+
+    # If no preset resolved, use standard default columns
+    if not active_columns:
+        from ..models.table_preset import DEFAULT_COLUMNS
+        active_columns = DEFAULT_COLUMNS
+
+    col_ref = db.collection('vendors')
     rows = []
+
     try:
         for doc in col_ref.stream():
             data = doc.to_dict() or {}
             data['id'] = doc.id
 
+            if collection_id and str(data.get('collection_id', '')).strip() != str(collection_id).strip():
+                continue
             if category and str(data.get('category', '')).strip().lower() != category.strip().lower():
                 continue
             if city and str(data.get('city', '')).strip().lower() != city.strip().lower():
@@ -56,29 +89,21 @@ def create_export():
                 if q not in name and q not in ph and q not in c:
                     continue
 
-            rows.append({
-                "Vendor ID": data.get('id', ''),
-                "Business Name": data.get('business_name', ''),
-                "Category": data.get('category', ''),
-                "Subcategory": data.get('subcategory', ''),
-                "Primary Phone": data.get('phone', ''),
-                "Alternate Phone": data.get('alternate_phone', ''),
-                "Email": data.get('email', ''),
-                "Website": data.get('website', ''),
-                "Address": data.get('address', ''),
-                "Area": data.get('area', ''),
-                "City": data.get('city', ''),
-                "District": data.get('district', ''),
-                "State": data.get('state', 'Andhra Pradesh'),
-                "Pincode": data.get('pincode', ''),
-                "Rating": data.get('rating', 0.0),
-                "Review Count": data.get('review_count', 0),
-                "Source": data.get('source', ''),
-                "Status": data.get('status', 'valid'),
-                "Data Quality Score": data.get('data_quality_score', 0),
-                "Dedupe Key": data.get('dedupe_key', ''),
-                "Created At": data.get('created_at', ''),
-            })
+            # Map fields according to configured preset column order & labels
+            row = {}
+            for col in active_columns:
+                k = col.get('key') or col.get('name')
+                label = col.get('label') or k
+                val = data.get(k)
+                if val is None and k == 'source_id':
+                    val = data.get('place_id')
+                elif val is None and k == 'place_id':
+                    val = data.get('source_id')
+                if val is None and 'custom_fields' in data and isinstance(data['custom_fields'], dict):
+                    val = data['custom_fields'].get(k)
+                row[label] = "" if val is None else val
+
+            rows.append(row)
     except Exception as e:
         print(f"[ExportRoutes] Query error: {e}")
 

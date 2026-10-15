@@ -82,6 +82,8 @@ export function CollectionDetails() {
     try {
       toast.info(`Generating Excel export for ${job.category || 'leads'}...`);
       await exportService.downloadDirectly({
+        collection_id: job.id,
+        preset_id: job.preset_id || undefined,
         category: job.category || undefined,
         city: job.location || undefined,
         format: 'xlsx',
@@ -322,6 +324,41 @@ export function CollectionDetails() {
               <span className="font-medium text-surface-800 mt-1 block">
                 {job.rate_limit || '60 req/min'} • {job.concurrency || 2} concurrent threads
               </span>
+            </div>
+          </div>
+
+          {/* Table Preset Schema Snapshot */}
+          <div className="pt-2">
+            <h3 className="text-xs font-bold text-surface-700 uppercase tracking-wider mb-2 flex items-center justify-between">
+              <span>Configured Table Schema (Export Order)</span>
+              <span className="text-[11px] font-semibold text-brand-600 bg-brand-50 px-2 py-0.5 rounded-full border border-brand-200">
+                {job.preset_name || 'Furniture Leads'}
+              </span>
+            </h3>
+            <div className="p-3 bg-surface-50 rounded-xl border border-surface-200/80">
+              <div className="flex flex-wrap gap-1.5">
+                {(job.preset_columns && job.preset_columns.length > 0
+                  ? job.preset_columns
+                  : [
+                      { label: 'Business Name', key: 'business_name', is_required: true },
+                      { label: 'Category', key: 'category' },
+                      { label: 'Phone', key: 'phone' },
+                      { label: 'Address', key: 'address' },
+                      { label: 'Website', key: 'website' },
+                    ]
+                ).map((col, idx) => (
+                  <span
+                    key={col.key || idx}
+                    className="inline-flex items-center gap-1.5 text-[11px] bg-white border border-surface-200 px-2.5 py-1 rounded-md text-surface-700 shadow-sm"
+                  >
+                    <span className="text-surface-400 font-mono text-[10px]">#{idx + 1}</span>
+                    <span className="font-medium">{col.label}</span>
+                    {col.is_required && (
+                      <span className="text-rose-500 font-bold text-xs" title="Required field">*</span>
+                    )}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
 

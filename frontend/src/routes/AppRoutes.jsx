@@ -20,6 +20,7 @@ import { VendorDetails } from '../pages/VendorDetails';
 import { Collections } from '../pages/Collections';
 import { CollectionDetails } from '../pages/CollectionDetails';
 import { DataEditor } from '../pages/DataEditor';
+import { TableEditor } from '../pages/TableEditor';
 import { ExcelImport } from '../pages/ExcelImport';
 import { Settings } from '../pages/Settings';
 import { NotFound } from '../pages/NotFound';
@@ -52,6 +53,7 @@ export function AppRoutes() {
         <Route path="/vendors/:id" element={<VendorDetails />} />
         <Route path="/collections" element={<Collections />} />
         <Route path="/collections/:id" element={<CollectionDetails />} />
+        <Route path="/table-editor" element={<TableEditor />} />
         <Route path="/data-editor" element={<DataEditor />} />
         <Route path="/import" element={<ExcelImport />} />
         <Route path="/settings" element={<Settings />} />
