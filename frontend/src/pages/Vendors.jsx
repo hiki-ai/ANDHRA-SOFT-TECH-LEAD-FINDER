@@ -30,6 +30,7 @@ import { useToast } from '../context/ToastContext';
 import { vendorService } from '../services/vendorService';
 import { exportService } from '../services/exportService';
 import { presetService } from '../services/presetService';
+import { validateAndNormalizePreset } from '../utils/tableSchema';
 
 export function Vendors() {
   const [vendorsList, setVendorsList] = useState([]);
@@ -109,12 +110,13 @@ export function Vendors() {
     presetService.getPresets()
       .then((res) => {
         const list = res?.data || res || [];
-        setPresets(Array.isArray(list) ? list : []);
-        const furn = list.find((p) => p.id === 'preset_furniture_leads' || p.name === 'Furniture Leads');
+        const normalized = (Array.isArray(list) ? list : []).map((p) => validateAndNormalizePreset(p));
+        setPresets(normalized);
+        const furn = normalized.find((p) => p.id === 'preset_furniture_leads' || p.name === 'Furniture Leads');
         if (furn) {
           setSelectedPresetId(furn.id);
-        } else if (list.length > 0) {
-          setSelectedPresetId(list[0].id);
+        } else if (normalized.length > 0) {
+          setSelectedPresetId(normalized[0].id);
         }
       })
       .catch((err) => {

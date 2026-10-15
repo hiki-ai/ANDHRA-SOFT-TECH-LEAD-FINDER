@@ -36,6 +36,15 @@ import { ConfirmDialog } from '../components/common/ConfirmDialog';
 import { useToast } from '../context/ToastContext';
 import { presetService } from '../services/presetService';
 import { cn } from '../utils/cn';
+import {
+  DEFAULT_COLUMNS,
+  CANONICAL_FURNITURE_PRESET,
+  buildFurnitureLeadsColumns,
+  validateAndNormalizeColumns,
+  validateAndNormalizePreset,
+  isFieldSupportedBySource,
+  getFieldCapabilityInfo,
+} from '../utils/tableSchema';
 
 const DATA_TYPES = [
   { value: 'text', label: 'Text (String)' },
@@ -116,6 +125,7 @@ export function TableEditor() {
   const [originalColumns, setOriginalColumns] = useState([]);
   const [capabilities, setCapabilities] = useState({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [saving, setSaving] = useState(false);
 
   // Filters & Search
@@ -150,29 +160,62 @@ export function TableEditor() {
   // Load all presets on mount
   const loadPresets = useCallback(async (preferredPresetId = null) => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await presetService.getPresets();
-      const list = res?.data || res || [];
-      const caps = res?.source_capabilities || {};
-      setPresets(Array.isArray(list) ? list : []);
-      setCapabilities(caps);
+      const list = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
+      let caps = res?.source_capabilities;
+
+      // If capabilities not included or empty, fetch from dedicated capabilities endpoint
+      if (!caps || typeof caps !== 'object' || Object.keys(caps).length === 0) {
+        try {
+          const capRes = await presetService.getCapabilities();
+          caps = capRes?.data || capRes || {};
+        } catch (capErr) {
+          console.warn('[TableEditor] Could not fetch fallback source capabilities:', capErr);
+          caps = {};
+        }
+      }
+
+      setCapabilities(caps || {});
+
+      // Validate and normalize all presets before rendering
+      const normalizedPresets = (list || []).map((p) =>
+        validateAndNormalizePreset(p, res?.default_columns || DEFAULT_COLUMNS)
+      );
+
+      // If no presets returned from server, provide canonical Furniture Leads preset as safe default
+      const finalPresets =
+        normalizedPresets.length > 0
+          ? normalizedPresets
+          : [validateAndNormalizePreset(CANONICAL_FURNITURE_PRESET)];
+      setPresets(finalPresets);
 
       // Determine active preset (preferred, or Furniture Leads, or first)
       let targetId = preferredPresetId;
-      if (!targetId || !list.some((p) => p.id === targetId)) {
-        const furn = list.find((p) => p.id === 'preset_furniture_leads' || p.name === 'Furniture Leads');
-        targetId = furn ? furn.id : (list[0]?.id || '');
+      if (!targetId || !finalPresets.some((p) => p.id === targetId)) {
+        const furn = finalPresets.find(
+          (p) => p.id === 'preset_furniture_leads' || p.name === 'Furniture Leads'
+        );
+        targetId = furn ? furn.id : (finalPresets[0]?.id || '');
       }
 
       setActivePresetId(targetId);
-      const activeP = list.find((p) => p.id === targetId);
-      if (activeP && activeP.columns) {
-        setColumns(JSON.parse(JSON.stringify(activeP.columns)));
-        setOriginalColumns(JSON.parse(JSON.stringify(activeP.columns)));
-      }
+      const activeP = finalPresets.find((p) => p.id === targetId);
+      const validCols = validateAndNormalizeColumns(
+        activeP?.columns,
+        res?.default_columns || DEFAULT_COLUMNS
+      );
+      setColumns(JSON.parse(JSON.stringify(validCols)));
+      setOriginalColumns(JSON.parse(JSON.stringify(validCols)));
     } catch (err) {
       console.error('[TableEditor] Load error:', err);
-      toast.error(err?.message || 'Failed to load table presets from Firestore.');
+      const errorMsg = err?.message || 'Failed to load table presets from Firestore.';
+      setLoadError(errorMsg);
+      toast.error(errorMsg);
+      // Safe fallback: populate standard columns if empty so view never breaks
+      setColumns((prev) => (prev.length > 0 ? prev : buildFurnitureLeadsColumns()));
+      setOriginalColumns((prev) => (prev.length > 0 ? prev : buildFurnitureLeadsColumns()));
     } finally {
       setLoading(false);
     }
@@ -208,9 +251,10 @@ export function TableEditor() {
     }
     setActivePresetId(presetId);
     const p = presets.find((item) => item.id === presetId);
-    if (p && p.columns) {
-      setColumns(JSON.parse(JSON.stringify(p.columns)));
-      setOriginalColumns(JSON.parse(JSON.stringify(p.columns)));
+    if (p) {
+      const validCols = validateAndNormalizeColumns(p.columns, DEFAULT_COLUMNS);
+      setColumns(JSON.parse(JSON.stringify(validCols)));
+      setOriginalColumns(JSON.parse(JSON.stringify(validCols)));
     }
   };
 
@@ -346,7 +390,8 @@ export function TableEditor() {
       } else {
         setColumnDeleteWarning('');
       }
-    } catch {
+    } catch (err) {
+      console.warn('[TableEditor] Could not check column usage:', err);
       setColumnDeleteWarning('');
     }
     setShowDeleteColumnConfirm(true);
@@ -559,6 +604,43 @@ export function TableEditor() {
     return columns.filter((c) => c.is_enabled);
   }, [columns]);
 
+  // Asynchronous Loading Guard
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[460px] bg-white rounded-2xl border border-surface-200/80 p-12 text-center shadow-card">
+        <div className="w-10 h-10 border-4 border-brand-200 border-t-brand-600 rounded-full animate-spin mb-4" />
+        <h3 className="text-base font-bold text-surface-900 tracking-tight">Loading Table Editor</h3>
+        <p className="text-xs text-surface-500 mt-1 max-w-sm">
+          Retrieving table presets, source capabilities, and column definitions...
+        </p>
+      </div>
+    );
+  }
+
+  // Critical Error State Guard
+  if (loadError && presets.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[460px] bg-white rounded-2xl border border-surface-200/80 p-12 text-center shadow-card">
+        <div className="w-12 h-12 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 mb-4">
+          <AlertTriangle className="w-6 h-6" />
+        </div>
+        <h3 className="text-base font-bold text-surface-900">Failed to Load Presets</h3>
+        <p className="text-xs text-surface-500 mt-1.5 max-w-md">
+          {loadError}
+        </p>
+        <Button
+          variant="primary"
+          size="sm"
+          iconLeft={RotateCcw}
+          onClick={() => loadPresets()}
+          className="mt-5"
+        >
+          Retry Connection
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Header & Preset Selector Bar */}
@@ -765,10 +847,8 @@ export function TableEditor() {
                   filteredColumns.map((col, filteredIdx) => {
                     // Find actual index in complete columns array
                     const actualIndex = columns.findIndex((c) => c.key === col.key);
-                    const isGoogleSupported =
-                      col.key in capabilities?.google_places
-                        ? capabilities.google_places[col.key]?.supported
-                        : !col.is_custom && col.key !== 'email';
+                    const isGoogleSupported = isFieldSupportedBySource(capabilities, 'google_places', col);
+                    const capInfo = getFieldCapabilityInfo(capabilities, 'google_places', col);
 
                     return (
                       <tr
@@ -887,9 +967,10 @@ export function TableEditor() {
                             <span
                               className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 cursor-help"
                               title={
-                                col.key === 'email'
+                                capInfo?.reason ||
+                                (col.key === 'email'
                                   ? 'Google Places API does not provide electronic mail addresses.'
-                                  : 'Not supplied by raw Google Places connector. Left blank unless enriched.'
+                                  : 'Not supplied by raw Google Places connector. Left blank unless enriched.')
                               }
                             >
                               <AlertTriangle className="w-3 h-3 text-amber-500" /> Unavailable

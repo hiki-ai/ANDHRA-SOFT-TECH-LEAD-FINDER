@@ -11,6 +11,7 @@ import {
   Sparkles,
   ShieldAlert,
   AlertTriangle,
+  AlertCircle,
   CheckCircle2,
   Lock,
   TableProperties,
@@ -20,6 +21,7 @@ import {
 import { collectionService } from '../../services/collectionService';
 import { sourceService } from '../../services/sourceService';
 import { presetService } from '../../services/presetService';
+import { validateAndNormalizePreset, isFieldSupportedBySource } from '../../utils/tableSchema';
 
 const CATEGORIES = [
   'Furniture',
@@ -94,14 +96,15 @@ export function QuickCollectionModal({ isOpen, onClose, onJobCreated }) {
         const list = res?.data || res || [];
         const caps = res?.source_capabilities || {};
         if (isMounted) {
-          setPresets(Array.isArray(list) ? list : []);
+          const normalized = (Array.isArray(list) ? list : []).map((p) => validateAndNormalizePreset(p));
+          setPresets(normalized);
           setCapabilities(caps);
           // Set initial preset to Furniture Leads if available
-          const furn = list.find((p) => p.id === 'preset_furniture_leads' || p.name === 'Furniture Leads');
+          const furn = normalized.find((p) => p.id === 'preset_furniture_leads' || p.name === 'Furniture Leads');
           if (furn) {
             setSelectedPresetId(furn.id);
-          } else if (list.length > 0) {
-            setSelectedPresetId(list[0].id);
+          } else if (normalized.length > 0) {
+            setSelectedPresetId(normalized[0].id);
           }
         }
       })
@@ -127,10 +130,8 @@ export function QuickCollectionModal({ isOpen, onClose, onJobCreated }) {
     const blockingErrors = [];
     const warnings = [];
 
-    const sourceCaps = capabilities?.[source] || {};
     enabledColumns.forEach((col) => {
-      const cap = sourceCaps[col.key];
-      const isSupported = cap ? cap.supported : (col.key !== 'email' && !col.is_custom);
+      const isSupported = isFieldSupportedBySource(capabilities, source, col);
 
       if (!isSupported) {
         if (col.is_required) {

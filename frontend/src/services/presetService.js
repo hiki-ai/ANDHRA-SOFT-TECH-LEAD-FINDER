@@ -12,10 +12,11 @@ import { apiClient } from './apiClient';
 export const presetService = {
   /**
    * Retrieves all saved table presets, default column definitions, and source capability matrix.
+   * Preserves full response payload containing data, source_capabilities, and default_columns.
    */
   async getPresets() {
     const res = await apiClient.get('/presets');
-    return res?.data || res;
+    return res || {};
   },
 
   /**
