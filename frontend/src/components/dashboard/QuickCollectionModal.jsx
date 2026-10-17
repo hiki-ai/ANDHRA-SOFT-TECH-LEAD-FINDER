@@ -21,20 +21,8 @@ import {
 import { collectionService } from '../../services/collectionService';
 import { sourceService } from '../../services/sourceService';
 import { presetService } from '../../services/presetService';
+import { categoryService, MASTER_CATEGORIES } from '../../services/categoryService';
 import { validateAndNormalizePreset, isFieldSupportedBySource } from '../../utils/tableSchema';
-
-const CATEGORIES = [
-  'Furniture',
-  'Restaurants & Cafes',
-  'Hotels & Hospitality',
-  'Real Estate & Builders',
-  'Hospitals & Healthcare',
-  'Schools & Educational Institutes',
-  'Automobiles & Garages',
-  'Electronics & Appliances',
-  'Textile & Garments',
-  'Hardware & Construction',
-];
 
 const LOCATIONS = [
   'Rajahmundry, Andhra Pradesh',
@@ -57,6 +45,7 @@ const SOURCE_OPTIONS = [
 
 export function QuickCollectionModal({ isOpen, onClose, onJobCreated }) {
   const [category, setCategory] = useState('');
+  const [categoriesList, setCategoriesList] = useState(MASTER_CATEGORIES);
   const [location, setLocation] = useState('');
   const [targetCount, setTargetCount] = useState('500');
   const [source, setSource] = useState('google_places');
@@ -75,6 +64,17 @@ export function QuickCollectionModal({ isOpen, onClose, onJobCreated }) {
   React.useEffect(() => {
     if (!isOpen) return;
     let isMounted = true;
+
+    // Load dynamic business categories
+    categoryService.getCategories()
+      .then((cats) => {
+        if (isMounted && Array.isArray(cats) && cats.length > 0) {
+          setCategoriesList(cats);
+        }
+      })
+      .catch((err) => {
+        console.warn('[QuickCollectionModal] Could not fetch categories:', err);
+      });
 
     // Load registered sources
     sourceService.getSources()
@@ -175,9 +175,15 @@ export function QuickCollectionModal({ isOpen, onClose, onJobCreated }) {
     if (!validate()) return;
 
     setIsSubmitting(true);
+    const cleanCategory = category.trim();
     try {
+      // Persist custom category asynchronously to Firestore/backend
+      categoryService.saveCategory(cleanCategory).catch((err) => {
+        console.warn('[QuickCollectionModal] Category persistence notice:', err);
+      });
+
       const res = await collectionService.startCollection({
-        category: category.trim(),
+        category: cleanCategory,
         location: location.trim(),
         target_count: parseInt(targetCount, 10),
         source,
@@ -189,7 +195,7 @@ export function QuickCollectionModal({ isOpen, onClose, onJobCreated }) {
       if (newJob?.status === 'failed') {
         toast.warning(newJob?.error_message || 'Job created but could not start due to connector requirements.');
       } else {
-        toast.success(`Collection job initiated for ${category} in ${location}.`);
+        toast.success(`Collection job initiated for ${cleanCategory} in ${location}.`);
       }
       if (onJobCreated) onJobCreated(newJob);
       onClose();
@@ -268,15 +274,15 @@ export function QuickCollectionModal({ isOpen, onClose, onJobCreated }) {
         {/* Category input */}
         <SearchableSelect
           label="Business Category"
-          placeholder="Select or enter category (e.g., Furniture, Hospitals)..."
-          options={CATEGORIES}
+          placeholder="Select or enter category (e.g., Furniture, Hospitals, Dental Clinics)..."
+          options={categoriesList}
           value={category}
           onChange={(val) => {
             setCategory(val);
             if (errors.category) setErrors((prev) => ({ ...prev, category: null }));
           }}
           error={errors.category}
-          helperText="Select a standard industry or enter a custom category keyword."
+          helperText="Select a standard industry or enter any custom business category."
         />
 
         {/* Location input */}

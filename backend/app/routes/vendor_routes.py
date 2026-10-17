@@ -30,6 +30,7 @@ def list_vendors():
     category = request.args.get('category')
     city = request.args.get('city')
     status = request.args.get('status')
+    collection_id = request.args.get('collection_id') or request.args.get('collection')
     search = request.args.get('search') or request.args.get('q')
     sort_by = request.args.get('sort_by', 'created_at')
     sort_dir = request.args.get('sort_dir', 'desc').lower()
@@ -46,6 +47,8 @@ def list_vendors():
                 continue
             data['id'] = doc.id
 
+            if collection_id and str(data.get('collection_id', '')).strip() != str(collection_id).strip():
+                continue
             if category and str(data.get('category', '')).strip().lower() != category.strip().lower():
                 continue
             if city and str(data.get('city', '')).strip().lower() != city.strip().lower():

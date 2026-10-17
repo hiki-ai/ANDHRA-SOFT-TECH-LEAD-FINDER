@@ -124,15 +124,23 @@ class CollectionWorker:
         duplicate_count = 0
         failed_count = 0
 
-        # Build custom fields template if custom columns are configured in preset
+        # Determine set of selected column keys from preset snapshot
+        selected_keys = set()
         custom_fields_template = {}
         if preset_columns and isinstance(preset_columns, list):
             for col in preset_columns:
-                if col.get('is_custom'):
-                    custom_fields_template[col['key']] = ""
+                if col.get('is_enabled', True):
+                    k = col.get('key') or col.get('name')
+                    if k:
+                        selected_keys.add(k)
+                        if col.get('is_custom'):
+                            custom_fields_template[k] = ""
+        else:
+            # Canonical fallback to standard 5 furniture leads columns
+            selected_keys = {"business_name", "category", "phone", "address", "website"}
 
         try:
-            for raw_record in connector.search(category, location, target_count, should_stop=should_stop):
+            for raw_record in connector.search(category, location, target_count, should_stop=should_stop, selected_columns=preset_columns):
                 if should_stop():
                     print(f"[CollectionWorker] Job {job_id} halted due to pause/cancellation.")
                     return
@@ -160,32 +168,47 @@ class CollectionWorker:
                     existing_keys.add(dedupe_key)
 
                 doc_id = f"ven_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
+
+                # 1. Essential internal system metadata (always preserved for system integrity)
                 vendor_doc = {
                     "id": doc_id,
-                    "business_name": b_name,
-                    "normalized_name": normalized.get('normalized_name', b_name.upper()),
-                    "category": normalized.get('category', category),
-                    "phone": phone,
-                    "address": normalized.get('address', ''),
-                    "city": city,
-                    "state": normalized.get('state', 'Andhra Pradesh'),
-                    "website": normalized.get('website', ''),
-                    "email": normalized.get('email', ''),
-                    "rating": float(normalized.get('rating', 0.0) or 0.0),
-                    "review_count": int(normalized.get('review_count', 0) or 0),
+                    "collection_id": job_id,
+                    "preset_id": preset_id,
+                    "dedupe_key": dedupe_key,
+                    "status": status,
+                    "data_quality_score": quality_score,
                     "source": connector.get_source_name(),
                     "source_id": raw_record.get('place_id') or raw_record.get('id', ''),
                     "place_id": raw_record.get('place_id') or raw_record.get('id', ''),
-                    "source_url": normalized.get('source_url', ''),
-                    "status": status,
-                    "data_quality_score": quality_score,
-                    "dedupe_key": dedupe_key,
-                    "collection_id": job_id,
-                    "preset_id": preset_id,
+                    "source_url": normalized.get('source_url', '') if ('website' in selected_keys or 'source_url' in selected_keys) else '',
                     "custom_fields": dict(custom_fields_template),
                     "created_at": datetime.now(timezone.utc).isoformat(),
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
+
+                # 2. Selected vendor fields: persist only configured columns
+                vendor_doc["business_name"] = b_name
+                vendor_doc["normalized_name"] = normalized.get('normalized_name', b_name.upper())
+
+                if "category" in selected_keys:
+                    vendor_doc["category"] = normalized.get('category', category)
+                if "phone" in selected_keys:
+                    vendor_doc["phone"] = phone
+                if "address" in selected_keys:
+                    vendor_doc["address"] = normalized.get('address', '')
+                if "city" in selected_keys:
+                    vendor_doc["city"] = city
+                if "state" in selected_keys:
+                    vendor_doc["state"] = normalized.get('state', 'Andhra Pradesh')
+                if "website" in selected_keys:
+                    vendor_doc["website"] = normalized.get('website', '')
+                if "email" in selected_keys:
+                    # Stored empty without fabricating unavailable email data
+                    vendor_doc["email"] = normalized.get('email', '')
+                if "rating" in selected_keys:
+                    vendor_doc["rating"] = float(normalized.get('rating', 0.0) or 0.0)
+                if "review_count" in selected_keys:
+                    vendor_doc["review_count"] = int(normalized.get('review_count', 0) or 0)
 
                 batch.append(vendor_doc)
 

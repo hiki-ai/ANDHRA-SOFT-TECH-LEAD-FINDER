@@ -71,7 +71,8 @@ class MagicpinConnector(BaseCollector):
         category: str,
         location: str,
         target_count: int,
-        should_stop: Optional[Callable[[], bool]] = None
+        should_stop: Optional[Callable[[], bool]] = None,
+        **kwargs
     ) -> Generator[Dict[str, Any], None, None]:
         if not self.is_configured():
             raise RuntimeError(

@@ -173,12 +173,45 @@ class GooglePlacesConnector(BaseCollector):
             self._safe_log(f"Place details network notice: {err}")
         return {}
 
+    def build_field_mask(self, selected_columns: Optional[list] = None) -> str:
+        """Dynamically computes official Google Places (New) field mask based on selected columns."""
+        if not selected_columns or not isinstance(selected_columns, list):
+            return self.DEFAULT_FIELD_MASK
+
+        selected_keys = set()
+        for col in selected_columns:
+            if isinstance(col, dict) and col.get('is_enabled', True):
+                k = col.get('key') or col.get('name')
+                if k:
+                    selected_keys.add(k)
+            elif isinstance(col, str):
+                selected_keys.add(col)
+
+        # Essential internal fields needed for pagination, business identification & typing
+        mask_parts = ["places.id", "places.displayName", "places.types", "nextPageToken"]
+
+        if any(k in selected_keys for k in ('address', 'city', 'state', 'pincode', 'area', 'district')):
+            mask_parts.append("places.formattedAddress")
+        if any(k in selected_keys for k in ('phone', 'alternate_phone')):
+            mask_parts.append("places.nationalPhoneNumber")
+            mask_parts.append("places.internationalPhoneNumber")
+        if 'website' in selected_keys:
+            mask_parts.append("places.websiteUri")
+        if 'rating' in selected_keys:
+            mask_parts.append("places.rating")
+        if 'review_count' in selected_keys:
+            mask_parts.append("places.userRatingCount")
+
+        return ",".join(mask_parts)
+
     def search(
         self,
         category: str,
         location: str,
         target_count: int,
-        should_stop: Optional[Callable[[], bool]] = None
+        should_stop: Optional[Callable[[], bool]] = None,
+        selected_columns: Optional[list] = None,
+        **kwargs
     ) -> Generator[Dict[str, Any], None, None]:
         """
         Executes verified search against Google Places API (New) Text Search endpoint:
@@ -209,10 +242,11 @@ class GooglePlacesConnector(BaseCollector):
             f"planned_pages={max_pages} (max {self.MAX_RESULTS_PER_QUERY} per Google API query)"
         )
 
+        field_mask = self.build_field_mask(selected_columns)
         headers = {
             "Content-Type": "application/json",
             "X-Goog-Api-Key": key,
-            "X-Goog-FieldMask": self.DEFAULT_FIELD_MASK
+            "X-Goog-FieldMask": field_mask
         }
 
         for page_idx in range(max_pages):

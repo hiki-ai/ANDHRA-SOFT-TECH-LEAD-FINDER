@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Layers,
   Download,
@@ -17,24 +17,43 @@ import {
   RefreshCw,
   AlertCircle,
   ArrowLeft,
+  Search,
+  Star,
+  ChevronLeft,
+  ChevronRight,
+  Database,
+  TableProperties,
 } from 'lucide-react';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
+import { Input } from '../components/common/Input';
+import { Select } from '../components/common/Select';
 import { ProgressBar } from '../components/common/ProgressBar';
 import { Breadcrumbs } from '../components/common/Breadcrumbs';
 import { formatNumber, formatPercent, formatDate } from '../utils/formatters';
 import { useToast } from '../context/ToastContext';
 import { collectionService } from '../services/collectionService';
 import { exportService } from '../services/exportService';
+import { vendorService } from '../services/vendorService';
+import { buildFurnitureLeadsColumns, validateAndNormalizeColumns } from '../utils/tableSchema';
 
 export function CollectionDetails() {
   const { id } = useParams();
   const toast = useToast();
+  const navigate = useNavigate();
 
   const [job, setJob] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [exporting, setExporting] = useState(false);
+
+  // Collection Vendors Table State
+  const [vendorList, setVendorList] = useState([]);
+  const [vendorsLoading, setVendorsLoading] = useState(false);
+  const [vendorSearch, setVendorSearch] = useState('');
+  const [vendorStatus, setVendorStatus] = useState('');
+  const [vendorPage, setVendorPage] = useState(1);
+  const [vendorTotal, setVendorTotal] = useState(0);
 
   const fetchJob = async () => {
     setLoading(true);
@@ -58,6 +77,46 @@ export function CollectionDetails() {
   useEffect(() => {
     fetchJob();
   }, [id]);
+
+  // Load vendors belonging to this collection
+  const loadCollectionVendors = useCallback(async () => {
+    if (!id) return;
+    setVendorsLoading(true);
+    try {
+      const res = await vendorService.getVendors({
+        collection_id: id,
+        page: vendorPage,
+        limit: 15,
+        search: vendorSearch.trim() || undefined,
+        status: vendorStatus || undefined,
+      });
+      const data = res?.data || res;
+      if (data) {
+        setVendorList(data.items || []);
+        setVendorTotal(data.pagination?.total ?? (data.items || []).length);
+      }
+    } catch (vErr) {
+      console.warn('[CollectionDetails] Could not fetch collection vendors:', vErr);
+    } finally {
+      setVendorsLoading(false);
+    }
+  }, [id, vendorPage, vendorSearch, vendorStatus]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadCollectionVendors();
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [loadCollectionVendors]);
+
+  // Resolve preset columns for this job
+  const activeColumns = useMemo(() => {
+    if (job?.preset_columns && Array.isArray(job.preset_columns) && job.preset_columns.length > 0) {
+      return job.preset_columns.filter((c) => c && c.is_enabled !== false);
+    }
+    // Fallback to standard 5 furniture leads columns
+    return buildFurnitureLeadsColumns().filter((c) => c.is_enabled);
+  }, [job]);
 
   const handlePauseToggle = async () => {
     if (!job?.id) return;
@@ -88,7 +147,7 @@ export function CollectionDetails() {
         city: job.location || undefined,
         format: 'xlsx',
       });
-      toast.success('Excel export generated.');
+      toast.success('Excel export downloaded successfully.');
     } catch (err) {
       toast.error(err?.message || 'Export failed.');
     } finally {
@@ -140,6 +199,25 @@ export function CollectionDetails() {
     job.current_source ||
     (job.source === 'google_places' ? 'Google Maps / Google Places API' : (job.source || 'Google Maps / Google Places API'));
 
+  // Safely get cell value from record
+  const getCellValue = (vendor, col) => {
+    if (!vendor || typeof vendor !== 'object') return '—';
+    const key = col.key || col.name;
+    let val = vendor[key];
+    if (val === undefined || val === null || val === '') {
+      if (vendor.custom_fields && typeof vendor.custom_fields === 'object') {
+        val = vendor.custom_fields[key];
+      }
+    }
+    if ((val === undefined || val === null || val === '') && key === 'source_id') {
+      val = vendor.place_id;
+    }
+    if ((val === undefined || val === null || val === '') && key === 'place_id') {
+      val = vendor.source_id;
+    }
+    return val !== undefined && val !== null && val !== '' ? val : '—';
+  };
+
   return (
     <div className="space-y-6">
       {/* Breadcrumbs */}
@@ -167,12 +245,15 @@ export function CollectionDetails() {
             </div>
             <p className="text-xs text-surface-500 mt-1">
               Started: <span className="font-medium text-surface-700">{formatDate(job.started_at)}</span> • ID:{' '}
-              <span className="font-mono text-surface-700">{job.id}</span>
+              <span className="font-mono text-surface-700">{job.id}</span> • Preset:{' '}
+              <span className="font-semibold text-brand-700 bg-brand-50 px-2 py-0.5 rounded border border-brand-100">
+                {job.preset_name || 'Furniture Leads'}
+              </span>
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
           {job.status === 'running' && (
             <Button
               variant="outline"
@@ -205,9 +286,9 @@ export function CollectionDetails() {
             Export to Excel
           </Button>
 
-          <Link to="/vendors">
+          <Link to={`/vendors?collection=${job.id}&preset=${job.preset_id || ''}`}>
             <Button variant="secondary" size="sm" iconRight={ExternalLink}>
-              View Vendors
+              Open in Lead Database
             </Button>
           </Link>
         </div>
@@ -337,16 +418,7 @@ export function CollectionDetails() {
             </h3>
             <div className="p-3 bg-surface-50 rounded-xl border border-surface-200/80">
               <div className="flex flex-wrap gap-1.5">
-                {(job.preset_columns && job.preset_columns.length > 0
-                  ? job.preset_columns
-                  : [
-                      { label: 'Business Name', key: 'business_name', is_required: true },
-                      { label: 'Category', key: 'category' },
-                      { label: 'Phone', key: 'phone' },
-                      { label: 'Address', key: 'address' },
-                      { label: 'Website', key: 'website' },
-                    ]
-                ).map((col, idx) => (
+                {activeColumns.map((col, idx) => (
                   <span
                     key={col.key || idx}
                     className="inline-flex items-center gap-1.5 text-[11px] bg-white border border-surface-200 px-2.5 py-1 rounded-md text-surface-700 shadow-sm"
@@ -360,40 +432,6 @@ export function CollectionDetails() {
                 ))}
               </div>
             </div>
-          </div>
-
-          {/* Validation & Error Breakdown */}
-          <div className="pt-2">
-            <h3 className="text-xs font-bold text-surface-700 uppercase tracking-wider mb-2">
-              Error / Diagnostic Breakdown
-            </h3>
-            {job.error_summary && job.error_summary.length > 0 ? (
-              <div className="space-y-2">
-                {job.error_summary.map((err, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center justify-between p-3 rounded-xl bg-rose-50/50 border border-rose-100 text-xs"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-semibold text-rose-700 bg-rose-100 px-2 py-0.5 rounded">
-                        {err.code || 'VALIDATION_ERR'}
-                      </span>
-                      <span className="text-surface-700">{err.message}</span>
-                    </div>
-                    <span className="font-bold text-rose-800">{err.count} records</span>
-                  </div>
-                ))}
-              </div>
-            ) : job.error_message ? (
-              <div className="p-3.5 bg-rose-50/70 rounded-xl border border-rose-200/80 text-xs text-rose-800 space-y-1">
-                <span className="font-semibold block text-rose-900">Diagnostics:</span>
-                <p className="font-mono">{job.error_message}</p>
-              </div>
-            ) : (
-              <div className="p-4 bg-surface-50 rounded-xl border border-surface-100 text-xs text-surface-500 text-center">
-                No error reports recorded for this collection.
-              </div>
-            )}
           </div>
         </div>
 
@@ -418,19 +456,199 @@ export function CollectionDetails() {
               </li>
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                <span>Batch upserting directly to Firebase Firestore</span>
+                <span>Preset-specific field persistence</span>
               </li>
             </ul>
           </div>
 
-          <div className="pt-4 border-t border-surface-100">
-            <Link to="/data-editor">
-              <Button variant="outline" size="sm" fullWidth iconLeft={FileSpreadsheet}>
-                Open in Spreadsheet Editor
+          <div className="pt-4 border-t border-surface-100 flex flex-col gap-2">
+            <Link to="/table-editor">
+              <Button variant="outline" size="sm" fullWidth iconLeft={TableProperties}>
+                Open Table Editor
               </Button>
             </Link>
           </div>
         </div>
+      </div>
+
+      {/* Preset-Specific Vendor Leads Table */}
+      <div className="bg-white rounded-2xl border border-surface-200 shadow-card overflow-hidden space-y-4 p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-surface-100">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-bold text-surface-900">
+                Extracted Leads — {job.preset_name || 'Preset'} Table View
+              </h2>
+              <span className="text-[11px] font-semibold bg-brand-50 text-brand-700 px-2 py-0.5 rounded-full border border-brand-200">
+                {vendorTotal} Leads
+              </span>
+            </div>
+            <p className="text-xs text-surface-500 mt-0.5">
+              Displaying exact configured preset columns in order #{1} to #{activeColumns.length}.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="w-48">
+              <Input
+                placeholder="Search leads..."
+                value={vendorSearch}
+                onChange={(e) => {
+                  setVendorSearch(e.target.value);
+                  setVendorPage(1);
+                }}
+                iconLeft={Search}
+                size="sm"
+              />
+            </div>
+            <div className="w-36">
+              <Select
+                value={vendorStatus}
+                onChange={(e) => {
+                  setVendorStatus(e.target.value);
+                  setVendorPage(1);
+                }}
+                options={[
+                  { value: '', label: 'All Statuses' },
+                  { value: 'valid', label: 'Valid Leads' },
+                  { value: 'duplicate', label: 'Duplicates' },
+                  { value: 'invalid', label: 'Review / Invalid' },
+                ]}
+                size="sm"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Dynamic Table */}
+        <div className="overflow-x-auto rounded-xl border border-surface-200">
+          <table className="w-full text-left border-collapse min-w-[700px]">
+            <thead>
+              <tr className="border-b border-surface-200 bg-surface-50 text-[11px] font-semibold text-surface-600 uppercase tracking-wider">
+                {activeColumns.map((col, idx) => (
+                  <th key={col.key || idx} className="py-3 px-4 whitespace-nowrap">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-surface-400 font-mono text-[10px]">#{idx + 1}</span>
+                      <span>{col.label}</span>
+                      {col.is_required && (
+                        <span className="text-rose-500 font-bold" title="Required field">*</span>
+                      )}
+                    </div>
+                  </th>
+                ))}
+                <th className="py-3 px-4 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-surface-100 text-xs">
+              {vendorsLoading ? (
+                <tr>
+                  <td colSpan={activeColumns.length + 1} className="py-12 text-center text-surface-400">
+                    <div className="flex items-center justify-center gap-2">
+                      <RefreshCw className="w-4 h-4 animate-spin text-brand-600" />
+                      <span>Loading records for this collection...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : vendorList.length === 0 ? (
+                <tr>
+                  <td colSpan={activeColumns.length + 1} className="py-12 text-center">
+                    <p className="text-xs text-surface-500">
+                      No leads found for this collection matching your filter.
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                vendorList.map((vendor) => (
+                  <tr
+                    key={vendor.id}
+                    onClick={() => navigate(`/vendors/${vendor.id}`)}
+                    className="table-row-hover transition-colors cursor-pointer group"
+                  >
+                    {activeColumns.map((col) => {
+                      const val = getCellValue(vendor, col);
+                      return (
+                        <td key={col.key} className="py-3 px-4 text-surface-700 max-w-[220px] truncate">
+                          {col.key === 'business_name' ? (
+                            <span className="font-semibold text-surface-900 group-hover:text-brand-600 transition-colors">
+                              {val}
+                            </span>
+                          ) : col.key === 'website' && val !== '—' ? (
+                            <a
+                              href={String(val).startsWith('http') ? val : `https://${val}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-brand-600 hover:underline flex items-center gap-1"
+                            >
+                              <span className="truncate">{val}</span>
+                              <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                            </a>
+                          ) : col.key === 'rating' && val !== '—' ? (
+                            <div className="flex items-center gap-1 text-surface-800">
+                              <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                              <span className="font-semibold">{val}</span>
+                            </div>
+                          ) : col.key === 'status' ? (
+                            <Badge variant={val === '—' ? 'default' : String(val).toLowerCase()} dot>
+                              {String(val).toUpperCase()}
+                            </Badge>
+                          ) : col.key === 'data_quality_score' && val !== '—' ? (
+                            <span className="font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded text-[10px]">
+                              {val}%
+                            </span>
+                          ) : (
+                            <span>{String(val)}</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td className="py-3 px-4 text-right">
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/vendors/${vendor.id}`);
+                        }}
+                      >
+                        Details
+                      </Button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination controls */}
+        {vendorTotal > 15 && (
+          <div className="flex items-center justify-between pt-3 text-xs text-surface-500">
+            <span>
+              Page {vendorPage} of {Math.max(1, Math.ceil(vendorTotal / 15))} ({vendorTotal} total records)
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={vendorPage <= 1}
+                onClick={() => setVendorPage((p) => Math.max(1, p - 1))}
+                iconLeft={ChevronLeft}
+              >
+                Prev
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={vendorPage >= Math.ceil(vendorTotal / 15)}
+                onClick={() => setVendorPage((p) => p + 1)}
+                iconRight={ChevronRight}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

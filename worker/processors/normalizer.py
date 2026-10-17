@@ -17,7 +17,16 @@ class RecordNormalizer:
         normalized = record.copy()
 
         # Business Name Normalization
-        raw_name = str(record.get('business_name', '')).strip()
+        raw_name = record.get('business_name')
+        if not raw_name:
+            d_name = record.get('displayName')
+            if isinstance(d_name, dict):
+                raw_name = d_name.get('text', '')
+            elif d_name:
+                raw_name = str(d_name)
+            else:
+                raw_name = record.get('name', '')
+        raw_name = str(raw_name or '').strip()
         normalized['business_name'] = raw_name
         normalized['normalized_name'] = re.sub(r'[^A-Z0-9\s]', '', raw_name.upper()).strip()
 

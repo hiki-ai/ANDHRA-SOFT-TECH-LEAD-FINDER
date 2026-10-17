@@ -35,6 +35,8 @@ export const COLLECTIONS = {
   COLLECTIONS: 'collections',
   SOURCES: 'sources',
   CUSTOM_COLUMNS: 'customColumns',
+  TABLE_PRESETS: 'tablePresets',
+  CATEGORIES: 'categories',
   METADATA: 'metadata',
   USERS: 'users',
 };

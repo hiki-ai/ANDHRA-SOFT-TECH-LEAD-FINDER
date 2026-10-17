@@ -107,7 +107,20 @@ def create_export():
     except Exception as e:
         print(f"[ExportRoutes] Query error: {e}")
 
-    df = pd.DataFrame(rows)
+    # Guaranteed ordered headers matching exact configured preset columns
+    ordered_headers = [col.get('label') or col.get('key') for col in active_columns]
+
+    if rows:
+        df = pd.DataFrame(rows)
+        # Ensure exact column order and presence of all configured columns
+        for col_name in ordered_headers:
+            if col_name not in df.columns:
+                df[col_name] = ""
+        df = df[ordered_headers]
+    else:
+        # Guarantee valid XLSX headers even when zero records match query
+        df = pd.DataFrame(columns=ordered_headers)
+
     export_id = f"exp_{int(time.time() * 1000)}"
 
     stream = io.BytesIO()
@@ -118,6 +131,16 @@ def create_export():
     else:
         with pd.ExcelWriter(stream, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='Vendors')
+            # Auto-adjust column widths for premium XLSX aesthetic
+            try:
+                ws = writer.sheets['Vendors']
+                for col in ws.columns:
+                    max_len = max(len(str(cell.value or '')) for cell in col)
+                    col_letter = col[0].column_letter
+                    ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+            except Exception:
+                pass
+
         mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         filename = f"andhra_soft_tech_leads_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.xlsx"
 
@@ -129,6 +152,7 @@ def create_export():
         "mimetype": mimetype,
         "filename": filename,
         "row_count": len(rows),
+        "columns": ordered_headers,
         "created_at": time.time()
     }
 

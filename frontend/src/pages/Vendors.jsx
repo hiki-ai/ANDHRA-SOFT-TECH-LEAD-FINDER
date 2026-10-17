@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Search,
   Filter,
@@ -19,6 +19,9 @@ import {
   SlidersHorizontal,
   RefreshCw,
   FolderOpen,
+  TableProperties,
+  Layers,
+  X,
 } from 'lucide-react';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
@@ -30,30 +33,78 @@ import { useToast } from '../context/ToastContext';
 import { vendorService } from '../services/vendorService';
 import { exportService } from '../services/exportService';
 import { presetService } from '../services/presetService';
-import { validateAndNormalizePreset } from '../utils/tableSchema';
+import { categoryService, MASTER_CATEGORIES } from '../services/categoryService';
+import { validateAndNormalizePreset, buildFurnitureLeadsColumns } from '../utils/tableSchema';
 
 export function Vendors() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const collectionParam = searchParams.get('collection') || '';
+  const presetParam = searchParams.get('preset') || '';
+
   const [vendorsList, setVendorsList] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 1 });
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState(null);
 
+  // Dynamic Presets & Columns state
+  const [presets, setPresets] = useState([]);
+  const [selectedPresetId, setSelectedPresetId] = useState(presetParam || 'preset_furniture_leads');
+  const [categoriesList, setCategoriesList] = useState(MASTER_CATEGORIES);
+
   // Preset Export Modal states
   const [showExportModal, setShowExportModal] = useState(false);
-  const [presets, setPresets] = useState([]);
-  const [selectedPresetId, setSelectedPresetId] = useState('preset_furniture_leads');
   const [exportFormat, setExportFormat] = useState('xlsx');
   const [exportAll, setExportAll] = useState(true);
 
+  // Filters state
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedLocation, setSelectedLocation] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
+  const [collectionFilter, setCollectionFilter] = useState(collectionParam);
   const [page, setPage] = useState(1);
 
   const toast = useToast();
   const navigate = useNavigate();
+
+  // Load saved presets on mount
+  useEffect(() => {
+    presetService.getPresets()
+      .then((res) => {
+        const list = res?.data || res || [];
+        const normalized = (Array.isArray(list) ? list : []).map((p) => validateAndNormalizePreset(p));
+        setPresets(normalized);
+        if (presetParam && normalized.some((p) => p.id === presetParam)) {
+          setSelectedPresetId(presetParam);
+        } else {
+          const furn = normalized.find((p) => p.id === 'preset_furniture_leads' || p.name === 'Furniture Leads');
+          if (furn) {
+            setSelectedPresetId(furn.id);
+          } else if (normalized.length > 0) {
+            setSelectedPresetId(normalized[0].id);
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('[Vendors] Could not load presets:', err);
+      });
+
+    categoryService.getCategories()
+      .then((cats) => {
+        if (Array.isArray(cats) && cats.length > 0) {
+          setCategoriesList(cats);
+        }
+      })
+      .catch((err) => {
+        console.warn('[Vendors] Could not load categories:', err);
+      });
+  }, [presetParam]);
+
+  // Keep collectionFilter synced with query param
+  useEffect(() => {
+    setCollectionFilter(collectionParam);
+  }, [collectionParam]);
 
   const loadVendors = useCallback(async () => {
     setLoading(true);
@@ -62,6 +113,7 @@ export function Vendors() {
       const res = await vendorService.getVendors({
         page,
         limit: 50,
+        collection_id: collectionFilter || undefined,
         search: searchTerm.trim() || undefined,
         category: selectedCategory || undefined,
         city: selectedLocation || undefined,
@@ -90,7 +142,7 @@ export function Vendors() {
     } finally {
       setLoading(false);
     }
-  }, [page, searchTerm, selectedCategory, selectedLocation, selectedStatus]);
+  }, [page, collectionFilter, searchTerm, selectedCategory, selectedLocation, selectedStatus]);
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -105,25 +157,6 @@ export function Vendors() {
     setPage(1);
   };
 
-  // Load saved presets on mount
-  useEffect(() => {
-    presetService.getPresets()
-      .then((res) => {
-        const list = res?.data || res || [];
-        const normalized = (Array.isArray(list) ? list : []).map((p) => validateAndNormalizePreset(p));
-        setPresets(normalized);
-        const furn = normalized.find((p) => p.id === 'preset_furniture_leads' || p.name === 'Furniture Leads');
-        if (furn) {
-          setSelectedPresetId(furn.id);
-        } else if (normalized.length > 0) {
-          setSelectedPresetId(normalized[0].id);
-        }
-      })
-      .catch((err) => {
-        console.warn('[Vendors] Could not load presets:', err);
-      });
-  }, []);
-
   const handleOpenExportModal = () => {
     setShowExportModal(true);
   };
@@ -134,6 +167,7 @@ export function Vendors() {
       toast.info('Generating spreadsheet export from Cloud Firestore...');
       const res = await exportService.downloadDirectly({
         preset_id: selectedPresetId,
+        collection_id: collectionFilter || undefined,
         category: selectedCategory || undefined,
         city: selectedLocation || undefined,
         status: selectedStatus || undefined,
@@ -151,8 +185,36 @@ export function Vendors() {
     }
   };
 
-  const activeExportPreset = presets.find((p) => p.id === selectedPresetId) || presets[0] || null;
-  const activeExportColumns = activeExportPreset?.columns?.filter((c) => c.is_enabled) || [];
+  // Resolve current active preset and its enabled columns
+  const activePreset = useMemo(() => {
+    return presets.find((p) => p.id === selectedPresetId) || presets[0] || null;
+  }, [presets, selectedPresetId]);
+
+  const activeColumns = useMemo(() => {
+    if (activePreset?.columns && Array.isArray(activePreset.columns) && activePreset.columns.length > 0) {
+      return activePreset.columns.filter((c) => c && c.is_enabled);
+    }
+    return buildFurnitureLeadsColumns().filter((c) => c.is_enabled);
+  }, [activePreset]);
+
+  // Safe cell value extractor completely avoiding "Cannot use 'in' operator" errors
+  const getCellValue = (vendor, col) => {
+    if (!vendor || typeof vendor !== 'object') return '—';
+    const key = col.key || col.name;
+    let val = vendor[key];
+    if (val === undefined || val === null || val === '') {
+      if (vendor.custom_fields && typeof vendor.custom_fields === 'object') {
+        val = vendor.custom_fields[key];
+      }
+    }
+    if ((val === undefined || val === null || val === '') && key === 'source_id') {
+      val = vendor.place_id;
+    }
+    if ((val === undefined || val === null || val === '') && key === 'place_id') {
+      val = vendor.source_id;
+    }
+    return val !== undefined && val !== null && val !== '' ? val : '—';
+  };
 
   const startRecord = pagination.total > 0 ? (pagination.page - 1) * pagination.limit + 1 : 0;
   const endRecord = pagination.total > 0 ? Math.min(pagination.page * pagination.limit, pagination.total) : 0;
@@ -180,26 +242,45 @@ export function Vendors() {
             variant="outline"
             size="sm"
             iconLeft={Download}
-            loading={exporting}
             onClick={handleOpenExportModal}
           >
-            Export Excel
+            Export Leads
           </Button>
+
           <Link to="/table-editor">
-            <Button variant="outline" size="sm">
+            <Button variant="secondary" size="sm" iconLeft={TableProperties}>
               Table Editor
-            </Button>
-          </Link>
-          <Link to="/data-editor">
-            <Button variant="primary" size="sm">
-              Open Spreadsheet Editor
             </Button>
           </Link>
         </div>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="bg-white p-4 rounded-2xl border border-surface-200 shadow-card grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      {/* Active Collection Filter Notice if query param present */}
+      {collectionFilter && (
+        <div className="p-3 bg-brand-50 border border-brand-200 rounded-xl flex items-center justify-between text-xs text-brand-900">
+          <div className="flex items-center gap-2">
+            <Layers className="w-4 h-4 text-brand-600 shrink-0" />
+            <span>
+              Showing leads isolated to collection job: <strong className="font-mono">{collectionFilter}</strong>
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              setCollectionFilter('');
+              setSearchParams({});
+              setPage(1);
+            }}
+            className="flex items-center gap-1 text-[11px] font-semibold text-brand-700 hover:text-brand-900 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+            <span>Clear Collection Filter</span>
+          </button>
+        </div>
+      )}
+
+      {/* Filter and Search Bar with Preset Selector */}
+      <div className="bg-white p-4 rounded-2xl border border-surface-200 shadow-card grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+        {/* Search */}
         <div className="lg:col-span-2">
           <Input
             placeholder="Search business name, phone, city, email..."
@@ -212,19 +293,28 @@ export function Vendors() {
           />
         </div>
 
+        {/* Table Preset View Selector */}
+        <Select
+          value={selectedPresetId}
+          onChange={(e) => setSelectedPresetId(e.target.value)}
+          options={presets.map((p) => ({
+            value: p.id,
+            label: `View: ${p.name}${p.is_default ? ' (Default)' : ''}`,
+          }))}
+          helperText="Select column preset"
+        />
+
+        {/* Dynamic Category Selector */}
         <Select
           value={selectedCategory}
           onChange={handleFilterChange(setSelectedCategory)}
           options={[
             { value: '', label: 'All Categories' },
-            { value: 'Furniture', label: 'Furniture' },
-            { value: 'Hospitals', label: 'Hospitals & Health' },
-            { value: 'Restaurants', label: 'Restaurants' },
-            { value: 'Real Estate', label: 'Real Estate' },
-            { value: 'Hotels', label: 'Hotels' },
+            ...categoriesList.map((cat) => ({ value: cat, label: cat })),
           ]}
         />
 
+        {/* City Filter */}
         <Select
           value={selectedLocation}
           onChange={handleFilterChange(setSelectedLocation)}
@@ -237,9 +327,13 @@ export function Vendors() {
             { value: 'Kakinada', label: 'Kakinada' },
             { value: 'Tirupati', label: 'Tirupati' },
             { value: 'Nellore', label: 'Nellore' },
+            { value: 'Kurnool', label: 'Kurnool' },
+            { value: 'Hyderabad', label: 'Hyderabad' },
+            { value: 'Bengaluru', label: 'Bengaluru' },
           ]}
         />
 
+        {/* Status Filter */}
         <Select
           value={selectedStatus}
           onChange={handleFilterChange(setSelectedStatus)}
@@ -265,27 +359,49 @@ export function Vendors() {
         </div>
       )}
 
-      {/* Vendors Data Table */}
+      {/* Preset-Configured Vendors Data Table */}
       <div className="bg-white rounded-2xl border border-surface-200 shadow-card overflow-hidden">
+        <div className="p-3 bg-surface-50 border-b border-surface-200 flex items-center justify-between text-xs text-surface-600">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-surface-800">Active Preset View:</span>
+            <span className="font-semibold text-brand-600 bg-brand-50 px-2 py-0.5 rounded border border-brand-200">
+              {activePreset?.name || 'Standard Table'}
+            </span>
+            <span className="text-[11px] text-surface-500 font-mono">
+              ({activeColumns.length} columns)
+            </span>
+          </div>
+          <Link
+            to="/table-editor"
+            className="text-brand-600 hover:text-brand-700 text-xs font-semibold flex items-center gap-1 transition-colors"
+          >
+            <span>Edit Preset in Table Editor</span>
+            <ExternalLink className="w-3 h-3" />
+          </Link>
+        </div>
+
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[900px]">
+          <table className="w-full text-left border-collapse min-w-[800px]">
             <thead>
-              <tr className="border-b border-surface-200 bg-surface-50 text-[11px] font-semibold text-surface-500 uppercase tracking-wider table-sticky-header">
-                <th className="py-3 px-4">Business Name</th>
-                <th className="py-3 px-4">Category</th>
-                <th className="py-3 px-4">Phone</th>
-                <th className="py-3 px-4">City / State</th>
-                <th className="py-3 px-4">Rating</th>
-                <th className="py-3 px-4">Source</th>
-                <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4 text-center">Quality</th>
+              <tr className="border-b border-surface-200 bg-surface-50/50 text-[11px] font-semibold text-surface-600 uppercase tracking-wider table-sticky-header">
+                {activeColumns.map((col, idx) => (
+                  <th key={col.key || idx} className="py-3 px-4 whitespace-nowrap">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-surface-400 font-mono text-[10px]">#{idx + 1}</span>
+                      <span>{col.label}</span>
+                      {col.is_required && (
+                        <span className="text-rose-500 font-bold" title="Required field">*</span>
+                      )}
+                    </div>
+                  </th>
+                ))}
                 <th className="py-3 px-4 text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-surface-100 text-xs">
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-surface-400">
+                  <td colSpan={activeColumns.length + 1} className="py-12 text-center text-surface-400">
                     <div className="flex items-center justify-center gap-2">
                       <RefreshCw className="w-4 h-4 animate-spin text-brand-600" />
                       <span>Loading vendor records from database...</span>
@@ -294,7 +410,7 @@ export function Vendors() {
                 </tr>
               ) : vendorsList.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-16 text-center">
+                  <td colSpan={activeColumns.length + 1} className="py-16 text-center">
                     <div className="max-w-sm mx-auto space-y-3">
                       <div className="w-12 h-12 rounded-2xl bg-surface-100 border border-surface-200 mx-auto flex items-center justify-center text-surface-400">
                         <FolderOpen className="w-6 h-6" />
@@ -327,53 +443,57 @@ export function Vendors() {
                     onClick={() => navigate(`/vendors/${vendor.id}`)}
                     className="table-row-hover transition-colors cursor-pointer group"
                   >
-                    <td className="py-3.5 px-4 font-semibold text-surface-900">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate max-w-[220px]">{vendor.business_name}</span>
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-4 text-surface-600 font-medium">
-                      {vendor.category || 'General'}
-                    </td>
-                    <td className="py-3.5 px-4 text-surface-700 font-mono">
-                      {vendor.phone || <span className="text-surface-400 italic">None</span>}
-                    </td>
-                    <td className="py-3.5 px-4 text-surface-600">
-                      {vendor.city || 'N/A'}{vendor.state ? `, ${vendor.state}` : ''}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <div className="flex items-center gap-1 text-surface-700">
-                        <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                        <span className="font-semibold">{vendor.rating ?? 0}</span>
-                        <span className="text-surface-400 text-[10px]">({vendor.review_count ?? 0})</span>
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-4 text-surface-500 text-[11px] truncate max-w-[160px]">
-                      {vendor.source || 'Direct Import'}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <Badge variant={vendor.status || 'valid'} dot>
-                        {String(vendor.status || 'valid').toUpperCase()}
-                      </Badge>
-                    </td>
-                    <td className="py-3.5 px-4 text-center">
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded-md font-semibold text-[11px] border ${getQualityScoreColor(
-                          vendor.data_quality_score || 0
-                        )}`}
-                      >
-                        {vendor.data_quality_score ?? 0}%
-                      </span>
-                    </td>
+                    {activeColumns.map((col) => {
+                      const val = getCellValue(vendor, col);
+                      return (
+                        <td key={col.key} className="py-3.5 px-4 text-surface-700 max-w-[220px] truncate">
+                          {col.key === 'business_name' ? (
+                            <span className="font-semibold text-surface-900 group-hover:text-brand-600 transition-colors">
+                              {val}
+                            </span>
+                          ) : col.key === 'website' && val !== '—' ? (
+                            <a
+                              href={String(val).startsWith('http') ? val : `https://${val}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-brand-600 hover:underline flex items-center gap-1"
+                            >
+                              <span className="truncate">{val}</span>
+                              <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                            </a>
+                          ) : col.key === 'rating' && val !== '—' ? (
+                            <div className="flex items-center gap-1 text-surface-800">
+                              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                              <span className="font-semibold">{val}</span>
+                            </div>
+                          ) : col.key === 'status' ? (
+                            <Badge variant={val === '—' ? 'default' : String(val).toLowerCase()} dot>
+                              {String(val).toUpperCase()}
+                            </Badge>
+                          ) : col.key === 'data_quality_score' && val !== '—' ? (
+                            <span className="font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded text-[10px]">
+                              {val}%
+                            </span>
+                          ) : col.key === 'phone' && val !== '—' ? (
+                            <span className="font-mono text-surface-700">{val}</span>
+                          ) : (
+                            <span>{String(val)}</span>
+                          )}
+                        </td>
+                      );
+                    })}
                     <td className="py-3.5 px-4 text-right">
-                      <Link
-                        to={`/vendors/${vendor.id}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-brand-600 hover:text-brand-800 font-semibold inline-flex items-center gap-1 group-hover:underline"
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/vendors/${vendor.id}`);
+                        }}
                       >
-                        <span>View</span>
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </Link>
+                        View
+                      </Button>
                     </td>
                   </tr>
                 ))
@@ -382,37 +502,31 @@ export function Vendors() {
           </table>
         </div>
 
-        {/* Server-Side Pagination Bar */}
-        <div className="p-4 border-t border-surface-100 bg-surface-50/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-surface-600">
-          <span>
-            {pagination.total > 0 ? (
-              <>
-                Showing <span className="font-semibold text-surface-900">{startRecord}</span> to{' '}
-                <span className="font-semibold text-surface-900">{endRecord}</span> of{' '}
-                <span className="font-semibold text-surface-900">{formatNumber(pagination.total)}</span> records
-              </>
-            ) : (
-              <span>Showing 0 records</span>
-            )}
-          </span>
+        {/* Pagination controls */}
+        <div className="p-4 bg-surface-50 border-t border-surface-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-surface-600">
+          <div>
+            Showing <span className="font-semibold text-surface-900">{startRecord}</span> to{' '}
+            <span className="font-semibold text-surface-900">{endRecord}</span> of{' '}
+            <span className="font-semibold text-surface-900">{formatNumber(pagination.total)}</span> results
+          </div>
 
           <div className="flex items-center gap-2">
             <Button
-              variant="outline"
               size="sm"
-              disabled={page <= 1 || loading}
-              onClick={() => setPage((p) => Math.max(p - 1, 1))}
+              variant="outline"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
               iconLeft={ChevronLeft}
             >
               Previous
             </Button>
-            <span className="px-3 py-1 font-semibold text-surface-900 bg-white border border-surface-200 rounded-lg">
-              Page {pagination.page} of {pagination.total_pages || 1}
+            <span className="px-3 py-1 font-semibold text-surface-700 bg-white border border-surface-200 rounded-lg">
+              {page} / {Math.max(1, pagination.total_pages)}
             </span>
             <Button
-              variant="outline"
               size="sm"
-              disabled={page >= pagination.total_pages || loading || pagination.total === 0}
+              variant="outline"
+              disabled={page >= pagination.total_pages}
               onClick={() => setPage((p) => p + 1)}
               iconRight={ChevronRight}
             >
@@ -422,127 +536,100 @@ export function Vendors() {
         </div>
       </div>
 
-      {/* Export Options Modal */}
+      {/* Export Modal with Preset Schema Selection */}
       <Modal
         isOpen={showExportModal}
         onClose={() => setShowExportModal(false)}
         title="Export Vendor Leads"
-        subtitle="Export vendor records to Excel or CSV using your configured table column presets."
+        subtitle="Generate and download a real spreadsheet from Cloud Firestore."
         maxWidth="md"
       >
         <div className="space-y-4">
-          {/* Preset Selector */}
+          {/* Table Preset Selector for Export */}
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-surface-700 tracking-wide uppercase">
-              Table Column Preset
+            <label className="text-xs font-semibold text-surface-700 uppercase tracking-wide">
+              Export Table Preset
             </label>
             <Select
               value={selectedPresetId}
               onChange={(e) => setSelectedPresetId(e.target.value)}
               options={presets.map((p) => ({
                 value: p.id,
-                label: `${p.name}${p.is_default ? ' (Default)' : p.is_system ? ' (System)' : ''}`,
+                label: `${p.name}${p.is_default ? ' (Default)' : ''}`,
               }))}
-              helperText="Determines the exact headers and column order in the downloaded spreadsheet."
+              helperText="Determines the exact column headers and sequence in the exported spreadsheet."
             />
           </div>
 
-          {/* Columns preview */}
-          {activeExportColumns.length > 0 && (
-            <div className="p-3 bg-surface-50 rounded-xl border border-surface-200 space-y-1.5">
-              <span className="text-[11px] font-semibold text-surface-600 block">
-                Exported Column Order ({activeExportColumns.length} columns):
+          {/* Column sequence preview */}
+          {activeColumns.length > 0 && (
+            <div className="p-3 bg-surface-50 rounded-xl border border-surface-200 text-xs space-y-1.5">
+              <span className="font-semibold text-surface-700 block">
+                Exported Columns ({activeColumns.length}):
               </span>
-              <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-                {activeExportColumns.map((col, idx) => (
+              <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+                {activeColumns.map((c, i) => (
                   <span
-                    key={col.key}
-                    className="inline-flex items-center gap-1 text-[11px] bg-white border border-surface-200 px-2 py-0.5 rounded-md text-surface-700 shadow-sm"
+                    key={c.key || i}
+                    className="inline-flex items-center gap-1 bg-white border border-surface-200 px-2 py-0.5 rounded text-[11px] text-surface-700"
                   >
-                    <span className="text-surface-400 font-mono text-[10px]">#{idx + 1}</span>
-                    <span className="font-medium">{col.label}</span>
+                    <span className="text-surface-400 font-mono text-[10px]">#{i + 1}</span>
+                    <span>{c.label}</span>
                   </span>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Export Scope */}
+          {/* Export Format */}
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-surface-700 tracking-wide uppercase">
-              Export Scope
+            <label className="text-xs font-semibold text-surface-700 uppercase tracking-wide">
+              Spreadsheet Format
             </label>
             <div className="grid grid-cols-2 gap-3">
-              <label
-                className={cn(
-                  'p-3 rounded-xl border text-xs font-medium cursor-pointer transition-all flex flex-col gap-1',
-                  exportAll
-                    ? 'bg-brand-50 border-brand-300 text-brand-900 ring-2 ring-brand-500/20'
-                    : 'bg-white border-surface-200 text-surface-700 hover:bg-surface-50'
-                )}
+              <button
+                type="button"
+                onClick={() => setExportFormat('xlsx')}
+                className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                  exportFormat === 'xlsx'
+                    ? 'border-brand-600 bg-brand-50/60 ring-2 ring-brand-500/20'
+                    : 'border-surface-200 hover:border-surface-300'
+                }`}
               >
-                <input
-                  type="radio"
-                  name="exportScope"
-                  checked={exportAll}
-                  onChange={() => setExportAll(true)}
-                  className="sr-only"
-                />
-                <span className="font-bold">Export All Matching Records</span>
-                <span className="text-[11px] text-surface-500">
-                  {pagination.total > 0 ? `${pagination.total} total matching leads` : 'All database records'}
+                <span className="block font-bold text-xs text-surface-900">Microsoft Excel (.xlsx)</span>
+                <span className="text-[11px] text-surface-500 mt-0.5 block">
+                  Formatted spreadsheet with styled headers and auto-sized columns.
                 </span>
-              </label>
+              </button>
 
-              <label
-                className={cn(
-                  'p-3 rounded-xl border text-xs font-medium cursor-pointer transition-all flex flex-col gap-1',
-                  !exportAll
-                    ? 'bg-brand-50 border-brand-300 text-brand-900 ring-2 ring-brand-500/20'
-                    : 'bg-white border-surface-200 text-surface-700 hover:bg-surface-50'
-                )}
+              <button
+                type="button"
+                onClick={() => setExportFormat('csv')}
+                className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                  exportFormat === 'csv'
+                    ? 'border-brand-600 bg-brand-50/60 ring-2 ring-brand-500/20'
+                    : 'border-surface-200 hover:border-surface-300'
+                }`}
               >
-                <input
-                  type="radio"
-                  name="exportScope"
-                  checked={!exportAll}
-                  onChange={() => setExportAll(false)}
-                  className="sr-only"
-                />
-                <span className="font-bold">Current Page Only</span>
-                <span className="text-[11px] text-surface-500">
-                  Up to {vendorsList.length} visible leads (Page {pagination.page})
+                <span className="block font-bold text-xs text-surface-900">Standard CSV (.csv)</span>
+                <span className="text-[11px] text-surface-500 mt-0.5 block">
+                  Lightweight raw comma-separated values compatible with all systems.
                 </span>
-              </label>
+              </button>
             </div>
           </div>
 
-          {/* File Format */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-surface-700 tracking-wide uppercase">
-              Spreadsheet Format
-            </label>
-            <Select
-              value={exportFormat}
-              onChange={(e) => setExportFormat(e.target.value)}
-              options={[
-                { value: 'xlsx', label: 'Microsoft Excel (.xlsx)' },
-                { value: 'csv', label: 'Comma-Separated Values (.csv)' },
-              ]}
-            />
-          </div>
-
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-surface-100">
+          <div className="pt-3 border-t border-surface-100 flex items-center justify-end gap-3">
             <Button variant="outline" onClick={() => setShowExportModal(false)} disabled={exporting}>
               Cancel
             </Button>
             <Button
               variant="primary"
-              iconLeft={Download}
-              isLoading={exporting}
               onClick={handleExecuteExport}
+              isLoading={exporting}
+              iconLeft={Download}
             >
-              Download {exportFormat.toUpperCase()}
+              Download Spreadsheet
             </Button>
           </div>
         </div>
