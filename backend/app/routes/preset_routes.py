@@ -241,6 +241,7 @@ def create_preset():
 def update_preset(preset_id):
     """Updates an existing table preset with validation."""
     db = get_firestore_db()
+    _ensure_default_presets(db)
     doc_ref = db.collection('tablePresets').document(preset_id)
     doc = doc_ref.get()
 

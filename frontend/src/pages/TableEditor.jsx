@@ -213,9 +213,12 @@ export function TableEditor() {
       const errorMsg = err?.message || 'Failed to load table presets from Firestore.';
       setLoadError(errorMsg);
       toast.error(errorMsg);
-      // Safe fallback: populate standard columns if empty so view never breaks
-      setColumns((prev) => (prev.length > 0 ? prev : buildFurnitureLeadsColumns()));
-      setOriginalColumns((prev) => (prev.length > 0 ? prev : buildFurnitureLeadsColumns()));
+      // Safe fallback: populate standard columns & active preset so view and save never break
+      const fallbackPreset = validateAndNormalizePreset(CANONICAL_FURNITURE_PRESET);
+      setPresets([fallbackPreset]);
+      setActivePresetId(fallbackPreset.id);
+      setColumns(JSON.parse(JSON.stringify(fallbackPreset.columns)));
+      setOriginalColumns(JSON.parse(JSON.stringify(fallbackPreset.columns)));
     } finally {
       setLoading(false);
     }
@@ -414,15 +417,22 @@ export function TableEditor() {
   const handleAddColumn = (e) => {
     e.preventDefault();
     const cleanLabel = newColLabel.trim();
-    const cleanKey = newColKey.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+    let cleanKey = newColKey.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
 
     if (!cleanLabel) {
       toast.warning('Please enter a column display name.');
       return;
     }
+
+    // Auto-generate key if empty
     if (!cleanKey) {
-      toast.warning('Please enter a valid field identifier key (letters, numbers, underscores).');
-      return;
+      cleanKey = cleanLabel
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+    }
+    if (!cleanKey) {
+      cleanKey = `custom_${Date.now()}`;
     }
 
     // Check duplicate key
@@ -440,27 +450,40 @@ export function TableEditor() {
       key: cleanKey,
       name: cleanKey,
       label: cleanLabel,
-      data_type: newColType,
+      data_type: newColType || 'text',
       position: columns.length,
       is_enabled: true,
-      is_required: newColRequired,
+      is_required: Boolean(newColRequired),
       is_custom: true,
       description: `Custom attribute: ${cleanLabel}`,
     };
 
     setColumns((prev) => [...prev, newCol]);
+
+    // Ensure newly added custom column is visible by clearing conflicting filters
+    if (statusFilter === 'disabled' || statusFilter === 'default') {
+      setStatusFilter('all');
+    }
+    if (searchTerm) {
+      setSearchTerm('');
+    }
+
     setShowAddModal(false);
     setNewColLabel('');
     setNewColKey('');
     setNewColType('text');
     setNewColRequired(false);
     setNewColKeyTouched(false);
-    toast.success(`Custom column '${cleanLabel}' added to table.`);
+    toast.success(`Custom column '${cleanLabel}' added to table. Click 'Save' to persist changes to Cloud Firestore.`);
   };
 
-  // Save current preset
+  // Save current preset to Cloud Firestore
   const handleSave = async () => {
-    if (!activePresetId) return;
+    let targetPresetId = activePresetId;
+    if (!targetPresetId) {
+      targetPresetId = presets[0]?.id || 'preset_furniture_leads';
+      setActivePresetId(targetPresetId);
+    }
 
     // Validate duplicate keys and labels
     const keys = new Set();
@@ -480,21 +503,32 @@ export function TableEditor() {
 
     setSaving(true);
     try {
-      await presetService.updatePreset(activePresetId, {
+      const payload = {
+        name: activePreset?.name || 'Table Preset',
+        description: activePreset?.description || '',
         columns,
-      });
+        enabled_columns: columns.filter((c) => c.is_enabled).map((c) => c.key),
+        required_columns: columns.filter((c) => c.is_required).map((c) => c.key),
+        extraction_config: activePreset?.extraction_config || { source: 'google_places', enforce_required: true },
+        export_config: activePreset?.export_config || { include_headers: true, format: 'xlsx' },
+        is_system: Boolean(activePreset?.is_system),
+        is_default: Boolean(activePreset?.is_default),
+      };
+
+      await presetService.updatePreset(targetPresetId, payload);
       setOriginalColumns(JSON.parse(JSON.stringify(columns)));
-      toast.success(`Preset '${activePreset?.name || 'Table'}' saved successfully.`);
-      loadPresets(activePresetId);
+      toast.success(`Preset '${activePreset?.name || 'Table'}' and ${columns.length} columns saved to Cloud Firestore.`);
+      await loadPresets(targetPresetId);
     } catch (err) {
       console.error('[TableEditor] Save error:', err);
-      toast.error(err?.message || 'Failed to save preset.');
+      const errorMsg = err?.message || 'Failed to save preset to Cloud Firestore.';
+      toast.error(errorMsg);
     } finally {
       setSaving(false);
     }
   };
 
-  // Save As new preset
+  // Save As new preset in Cloud Firestore
   const handleSaveAs = async (e) => {
     e.preventDefault();
     const cleanName = newPresetName.trim();
@@ -510,17 +544,25 @@ export function TableEditor() {
 
     setSaving(true);
     try {
-      const res = await presetService.createPreset({
+      const payload = {
         name: cleanName,
         description: newPresetDesc.trim(),
         columns,
-      });
+        enabled_columns: columns.filter((c) => c.is_enabled).map((c) => c.key),
+        required_columns: columns.filter((c) => c.is_required).map((c) => c.key),
+        extraction_config: activePreset?.extraction_config || { source: 'google_places', enforce_required: true },
+        export_config: activePreset?.export_config || { include_headers: true, format: 'xlsx' },
+        is_system: false,
+        is_default: false,
+      };
+
+      const res = await presetService.createPreset(payload);
       const created = res?.data || res;
-      toast.success(`Preset '${cleanName}' created successfully.`);
+      toast.success(`Preset '${cleanName}' created successfully in Cloud Firestore.`);
       setShowSaveAsModal(false);
       setNewPresetName('');
       setNewPresetDesc('');
-      loadPresets(created?.id);
+      await loadPresets(created?.id);
     } catch (err) {
       console.error('[TableEditor] Save As error:', err);
       toast.error(err?.message || 'Failed to create new preset.');
@@ -685,6 +727,7 @@ export function TableEditor() {
 
           {/* Save Button */}
           <Button
+            id="table-editor-save-btn"
             variant="primary"
             size="sm"
             iconLeft={Save}
@@ -805,6 +848,7 @@ export function TableEditor() {
             </div>
 
             <Button
+              id="table-editor-add-column-btn"
               variant="outline"
               size="sm"
               iconLeft={Plus}
@@ -1169,7 +1213,7 @@ export function TableEditor() {
             <Button variant="outline" onClick={() => setShowAddModal(false)}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary" iconLeft={Plus}>
+            <Button id="modal-add-column-submit-btn" type="submit" variant="primary" iconLeft={Plus}>
               Add Column
             </Button>
           </div>

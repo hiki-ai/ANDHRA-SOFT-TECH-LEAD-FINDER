@@ -28,6 +28,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from '../config/firebase';
+import { CANONICAL_FURNITURE_PRESET, DEFAULT_COLUMNS } from '../utils/tableSchema';
 
 // Collection Names
 export const COLLECTIONS = {
@@ -232,6 +233,164 @@ export const firestoreService = {
     } catch (error) {
       console.error('[Firestore] createCollection error:', error);
       throw error;
+    }
+  },
+
+  /**
+   * Fetch all table presets directly from Cloud Firestore (tablePresets collection)
+   */
+  async getTablePresets() {
+    if (!this.isReady()) return [];
+    try {
+      const colRef = collection(db, COLLECTIONS.TABLE_PRESETS);
+      const snapshot = await getDocs(colRef);
+      const items = [];
+      snapshot.forEach((d) => {
+        const data = d.data() || {};
+        items.push({ id: d.id, ...data });
+      });
+
+      // If Firestore tablePresets is completely empty, idempotently seed canonical furniture leads
+      if (items.length === 0) {
+        try {
+          const defaultPreset = {
+            ...CANONICAL_FURNITURE_PRESET,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          const docRef = doc(db, COLLECTIONS.TABLE_PRESETS, defaultPreset.id);
+          await setDoc(docRef, defaultPreset, { merge: true });
+          items.push(defaultPreset);
+        } catch (seedErr) {
+          console.warn('[Firestore] Could not seed default preset:', seedErr.message);
+        }
+      }
+
+      // Sort system/default first, then by name
+      items.sort((a, b) => {
+        const aDef = a.is_default ? 0 : 1;
+        const bDef = b.is_default ? 0 : 1;
+        if (aDef !== bDef) return aDef - bDef;
+        return (a.name || '').localeCompare(b.name || '');
+      });
+
+      return items;
+    } catch (error) {
+      console.warn('[Firestore] getTablePresets notice:', error.message);
+      return [];
+    }
+  },
+
+  /**
+   * Fetch a single table preset by ID from Cloud Firestore
+   */
+  async getTablePresetById(id) {
+    if (!this.isReady() || !id) return null;
+    try {
+      const docRef = doc(db, COLLECTIONS.TABLE_PRESETS, id);
+      const snapshot = await getDoc(docRef);
+      if (snapshot.exists()) {
+        return { id: snapshot.id, ...snapshot.data() };
+      }
+      return null;
+    } catch (error) {
+      console.warn(`[Firestore] getTablePresetById error for ${id}:`, error.message);
+      return null;
+    }
+  },
+
+  /**
+   * Persist a table preset document to Cloud Firestore
+   * Document path: /tablePresets/{presetId}
+   */
+  async saveTablePreset(id, presetData) {
+    if (!id) throw new Error('Preset ID is required to save to Firestore.');
+    if (!this.isReady()) {
+      return { id, ...presetData };
+    }
+
+    try {
+      const docRef = doc(db, COLLECTIONS.TABLE_PRESETS, id);
+      const cleanColumns = Array.isArray(presetData.columns) ? presetData.columns : [];
+      const enabledKeys = cleanColumns.filter((c) => c.is_enabled).map((c) => c.key);
+      const requiredKeys = cleanColumns.filter((c) => c.is_required).map((c) => c.key);
+
+      const payload = {
+        name: presetData.name || 'Table Preset',
+        description: presetData.description || '',
+        columns: cleanColumns,
+        enabled_columns: enabledKeys,
+        required_columns: requiredKeys,
+        extraction_config: presetData.extraction_config || { source: 'google_places', enforce_required: true },
+        export_config: presetData.export_config || { include_headers: true, format: 'xlsx' },
+        is_system: Boolean(presetData.is_system),
+        is_default: Boolean(presetData.is_default),
+        updated_at: serverTimestamp(),
+      };
+
+      if (presetData.user_id) {
+        payload.user_id = presetData.user_id;
+      }
+      if (presetData.created_at) {
+        payload.created_at = presetData.created_at;
+      }
+
+      await setDoc(docRef, payload, { merge: true });
+      return { id, ...payload, updated_at: new Date().toISOString() };
+    } catch (error) {
+      console.error(`[Firestore] saveTablePreset error for ${id}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * Delete a table preset from Cloud Firestore
+   */
+  async deleteTablePreset(id) {
+    if (!id || !this.isReady()) return true;
+    try {
+      const docRef = doc(db, COLLECTIONS.TABLE_PRESETS, id);
+      await deleteDoc(docRef);
+      return true;
+    } catch (error) {
+      console.error(`[Firestore] deleteTablePreset error for ${id}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * Save custom column definition in customColumns collection
+   */
+  async saveCustomColumn(columnData) {
+    if (!this.isReady() || !columnData?.key) return columnData;
+    try {
+      const docRef = doc(db, COLLECTIONS.CUSTOM_COLUMNS, columnData.key);
+      const payload = {
+        ...columnData,
+        updated_at: serverTimestamp(),
+      };
+      await setDoc(docRef, payload, { merge: true });
+      return { id: columnData.key, ...payload };
+    } catch (error) {
+      console.warn('[Firestore] saveCustomColumn notice (admin claim may be required):', error.message);
+      return columnData;
+    }
+  },
+
+  /**
+   * Retrieve all custom columns from customColumns collection
+   */
+  async getCustomColumns() {
+    if (!this.isReady()) return [];
+    try {
+      const colRef = collection(db, COLLECTIONS.CUSTOM_COLUMNS);
+      const snapshot = await getDocs(colRef);
+      const items = [];
+      snapshot.forEach((d) => items.push({ id: d.id, ...d.data() }));
+      return items;
+    } catch (error) {
+      console.warn('[Firestore] getCustomColumns notice:', error.message);
+      return [];
     }
   },
 };
