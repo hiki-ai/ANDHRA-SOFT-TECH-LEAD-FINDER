@@ -22,12 +22,14 @@ from typing import Optional, Set
 try:
     from collectors.source_manager import SourceManager
     from processors.normalizer import RecordNormalizer
+    from processors.google_places_photo_mapper import GooglePlacesPhotoMapper
     from processors.validator import RecordValidator
     from processors.deduplicator import RecordDeduplicator
     from services.progress_service import ProgressService
 except (ImportError, ValueError):
     from ..collectors.source_manager import SourceManager
     from ..processors.normalizer import RecordNormalizer
+    from ..processors.google_places_photo_mapper import GooglePlacesPhotoMapper
     from ..processors.validator import RecordValidator
     from ..processors.deduplicator import RecordDeduplicator
     from .progress_service import ProgressService
@@ -139,14 +141,36 @@ class CollectionWorker:
             # Canonical fallback to standard 5 furniture leads columns
             selected_keys = {"business_name", "category", "phone", "address", "website"}
 
+        search_options = {"should_stop": should_stop, "selected_columns": preset_columns}
+        if connector.get_source_id() == "google_places":
+            provider_column_keys = {
+                "business_name", "category", "phone", "address", "city", "state",
+                "website", "rating", "review_count", "place_id", "source_id",
+            }
+            search_options["selected_columns"] = [
+                column for column in (preset_columns or [])
+                if (
+                    isinstance(column, dict)
+                    and (column.get("key") or column.get("name")) in provider_column_keys
+                ) or (isinstance(column, str) and column in provider_column_keys)
+            ]
+            search_options["include_photos"] = bool(
+                selected_keys.intersection((*GooglePlacesPhotoMapper.IMAGE_FIELDS, "image_count"))
+            )
+
         try:
-            for raw_record in connector.search(category, location, target_count, should_stop=should_stop, selected_columns=preset_columns):
+            for raw_record in connector.search(category, location, target_count, **search_options):
                 if should_stop():
                     print(f"[CollectionWorker] Job {job_id} halted due to pause/cancellation.")
                     return
 
                 found_count += 1
-                normalized = RecordNormalizer.normalize(raw_record)
+                mapped_record = raw_record
+                image_fields = (*GooglePlacesPhotoMapper.IMAGE_FIELDS, "image_count")
+                if connector.get_source_id() == "google_places" and selected_keys.intersection(image_fields):
+                    mapped_record = GooglePlacesPhotoMapper.map_record(raw_record, connector.fetch_photo_uri)
+
+                normalized = RecordNormalizer.normalize(mapped_record)
                 is_valid, reason = RecordValidator.validate(normalized)
 
                 b_name = normalized.get('business_name', '')
@@ -209,6 +233,12 @@ class CollectionWorker:
                     vendor_doc["rating"] = float(normalized.get('rating', 0.0) or 0.0)
                 if "review_count" in selected_keys:
                     vendor_doc["review_count"] = int(normalized.get('review_count', 0) or 0)
+                for image_field in image_fields:
+                    if image_field in selected_keys:
+                        value = normalized.get(image_field)
+                        vendor_doc[image_field] = int(value or 0) if image_field == "image_count" else value
+                        if image_field in vendor_doc["custom_fields"]:
+                            vendor_doc["custom_fields"][image_field] = vendor_doc[image_field]
 
                 batch.append(vendor_doc)
 

@@ -173,10 +173,13 @@ class GooglePlacesConnector(BaseCollector):
             self._safe_log(f"Place details network notice: {err}")
         return {}
 
-    def build_field_mask(self, selected_columns: Optional[list] = None) -> str:
+    def build_field_mask(self, selected_columns: Optional[list] = None, include_photos: bool = False) -> str:
         """Dynamically computes official Google Places (New) field mask based on selected columns."""
         if not selected_columns or not isinstance(selected_columns, list):
-            return self.DEFAULT_FIELD_MASK
+            mask_parts = self.DEFAULT_FIELD_MASK.split(",")
+            if include_photos:
+                mask_parts.append("places.photos")
+            return ",".join(mask_parts)
 
         selected_keys = set()
         for col in selected_columns:
@@ -201,8 +204,35 @@ class GooglePlacesConnector(BaseCollector):
             mask_parts.append("places.rating")
         if 'review_count' in selected_keys:
             mask_parts.append("places.userRatingCount")
+        if include_photos or selected_keys.intersection({'image_1_url', 'image_2_url', 'image_3_url', 'image_count'}):
+            mask_parts.append("places.photos")
 
         return ",".join(mask_parts)
+
+    def fetch_photo_uri(self, photo_name: str) -> Optional[str]:
+        """Resolve a Places photo resource to its media URI using the server-side API key."""
+        key = self.get_api_key()
+        if not key or not photo_name:
+            return None
+
+        self._request_counter += 1
+        url = f"https://places.googleapis.com/v1/{photo_name}/media"
+        headers = {
+            "X-Goog-Api-Key": key,
+        }
+        try:
+            response = requests.get(
+                url,
+                headers=headers,
+                params={"skipHttpRedirect": "true", "maxWidthPx": 800},
+                timeout=10,
+            )
+            if response.status_code == 200:
+                return response.json().get("photoUri")
+            self._safe_log(f"Place photo media HTTP {response.status_code}.")
+        except Exception as err:
+            self._safe_log(f"Place photo media network notice: {err}")
+        return None
 
     def search(
         self,
@@ -211,6 +241,7 @@ class GooglePlacesConnector(BaseCollector):
         target_count: int,
         should_stop: Optional[Callable[[], bool]] = None,
         selected_columns: Optional[list] = None,
+        include_photos: bool = False,
         **kwargs
     ) -> Generator[Dict[str, Any], None, None]:
         """
@@ -242,7 +273,7 @@ class GooglePlacesConnector(BaseCollector):
             f"planned_pages={max_pages} (max {self.MAX_RESULTS_PER_QUERY} per Google API query)"
         )
 
-        field_mask = self.build_field_mask(selected_columns)
+        field_mask = self.build_field_mask(selected_columns, include_photos=include_photos)
         headers = {
             "Content-Type": "application/json",
             "X-Goog-Api-Key": key,
@@ -419,6 +450,7 @@ class GooglePlacesConnector(BaseCollector):
                     "website": website,
                     "source": self.get_source_name(),
                     "source_url": f"https://www.google.com/maps/place/?q=place_id:{place_id}" if place_id else "",
+                    "photos": place.get('photos') or [],
                 }
 
                 yield record

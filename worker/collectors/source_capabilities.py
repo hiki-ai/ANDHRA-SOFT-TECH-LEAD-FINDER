@@ -69,6 +69,30 @@ SOURCE_FIELD_CAPABILITIES: Dict[str, Dict[str, Dict[str, Any]]] = {
             "availability": "full",
             "description": "Total count of public reviews on Google Maps.",
         },
+        "image_1_url": {
+            "supported": True,
+            "source_field": "places.photos -> Places Photo Media API photoUri",
+            "availability": "derived",
+            "description": "Resolved from the first available Google Places photo reference.",
+        },
+        "image_2_url": {
+            "supported": True,
+            "source_field": "places.photos -> Places Photo Media API photoUri",
+            "availability": "derived",
+            "description": "Resolved from the second available Google Places photo reference.",
+        },
+        "image_3_url": {
+            "supported": True,
+            "source_field": "places.photos -> Places Photo Media API photoUri",
+            "availability": "derived",
+            "description": "Resolved from the third available Google Places photo reference.",
+        },
+        "image_count": {
+            "supported": True,
+            "source_field": "resolved Google Places photo media URIs",
+            "availability": "derived",
+            "description": "Count of photo URIs resolved for the shop, up to three.",
+        },
         "source": {
             "supported": True,
             "source_field": "system provider name",

@@ -30,6 +30,8 @@ if worker_dir not in sys.path:
     sys.path.insert(0, worker_dir)
 
 from collectors.connectors.google_places import GooglePlacesConnector
+from collectors.source_capabilities import check_source_capabilities
+from processors.google_places_photo_mapper import GooglePlacesPhotoMapper
 from services.collection_worker import CollectionWorker
 
 
@@ -49,6 +51,7 @@ def test_google_places_new_success():
                 "websiteUri": "https://andhraspicekitchen.in",
                 "rating": 4.6,
                 "userRatingCount": 380,
+                "photos": [{"name": "places/ChIJ_vsp_123/photos/photo_1"}],
                 "types": ["restaurant", "food", "point_of_interest"]
             }
         ],
@@ -61,7 +64,7 @@ def test_google_places_new_success():
         mock_res.json.return_value = mock_response_payload
         mock_post.return_value = mock_res
 
-        records = list(connector.search("Restaurants", "Visakhapatnam", 10))
+        records = list(connector.search("Restaurants", "Visakhapatnam", 10, include_photos=True))
 
         assert len(records) == 1
         rec = records[0]
@@ -76,6 +79,7 @@ def test_google_places_new_success():
         assert rec['website'] == "https://andhraspicekitchen.in"
         assert rec['source'] == "Google Maps / Google Places API"
         assert rec['source_url'] == "https://www.google.com/maps/place/?q=place_id:ChIJ_vsp_123"
+        assert rec['photos'] == [{"name": "places/ChIJ_vsp_123/photos/photo_1"}]
 
         # Verify Google Places API (New) contract
         mock_post.assert_called_once()
@@ -89,10 +93,125 @@ def test_google_places_new_success():
         assert 'places.formattedAddress' in headers['X-Goog-FieldMask']
         assert 'places.nationalPhoneNumber' in headers['X-Goog-FieldMask']
         assert 'places.websiteUri' in headers['X-Goog-FieldMask']
+        assert 'places.photos' in headers['X-Goog-FieldMask']
         assert kwargs['json']['textQuery'] == "Restaurants in Visakhapatnam"
         assert kwargs['json']['pageSize'] == 10
 
     print("[PASS] test_google_places_new_success: Successfully verified Places API (New) contract and mapping.")
+
+
+def test_google_places_photo_media_uri_resolution():
+    connector = GooglePlacesConnector(api_key="AIzaSyTestKeyPlacesNew987654321")
+    with patch('requests.get') as mock_get:
+        mock_res = MagicMock()
+        mock_res.status_code = 200
+        mock_res.json.return_value = {"photoUri": "https://photos.example/shop-1"}
+        mock_get.return_value = mock_res
+
+        photo_uri = connector.fetch_photo_uri("places/place-1/photos/photo-1")
+
+    assert photo_uri == "https://photos.example/shop-1"
+    args, kwargs = mock_get.call_args
+    assert args[0] == "https://places.googleapis.com/v1/places/place-1/photos/photo-1/media"
+    assert kwargs["headers"]["X-Goog-Api-Key"] == "AIzaSyTestKeyPlacesNew987654321"
+    assert kwargs["params"]["skipHttpRedirect"] == "true"
+
+
+def test_google_places_photo_mapping_and_optional_photos():
+    required_image_columns = [
+        {"key": key, "label": key, "is_enabled": True, "is_required": True}
+        for key in ("image_1_url", "image_2_url", "image_3_url", "image_count")
+    ]
+    audit = check_source_capabilities("google_places", required_image_columns)
+    assert audit["is_valid"] is True
+
+    requested_names = []
+
+    def resolve_photo(photo_name):
+        requested_names.append(photo_name)
+        return f"https://photos.example/{photo_name.rsplit('/', 1)[-1]}"
+
+    raw_record = {
+        "business_name": "Test Shop",
+        "photos": [{"name": f"places/place-1/photos/photo-{index}"} for index in range(1, 5)],
+    }
+    mapped = GooglePlacesPhotoMapper.map_record(raw_record, resolve_photo)
+    assert requested_names == [
+        "places/place-1/photos/photo-1",
+        "places/place-1/photos/photo-2",
+        "places/place-1/photos/photo-3",
+    ]
+    assert mapped["image_1_url"] == "https://photos.example/photo-1"
+    assert mapped["image_2_url"] == "https://photos.example/photo-2"
+    assert mapped["image_3_url"] == "https://photos.example/photo-3"
+    assert mapped["image_count"] == 3
+
+    partial = GooglePlacesPhotoMapper.map_record(
+        {"photos": [{"name": "photo-1"}, {"name": "photo-2"}]},
+        lambda name: "https://photos.example/photo-1" if name == "photo-1" else None,
+    )
+    assert partial["image_1_url"] == "https://photos.example/photo-1"
+    assert partial["image_2_url"] is None
+    assert partial["image_3_url"] is None
+    assert partial["image_count"] == 1
+
+    empty = GooglePlacesPhotoMapper.map_record({"photos": []}, resolve_photo)
+    assert empty["image_1_url"] is None
+    assert empty["image_2_url"] is None
+    assert empty["image_3_url"] is None
+    assert empty["image_count"] == 0
+
+
+def test_collection_worker_persists_mapped_images():
+    mock_db = MagicMock()
+    mock_doc_ref = MagicMock()
+    mock_db.collection.return_value.document.return_value = mock_doc_ref
+    mock_doc_ref.get.return_value.to_dict.return_value = {"status": "running"}
+    mock_db.collection.return_value.stream.return_value = []
+
+    worker = CollectionWorker(db=mock_db)
+    worker.progress_service.commit_batch = MagicMock()
+    worker.progress_service.update_job_progress = MagicMock()
+    columns = [
+        {"key": "business_name", "is_enabled": True},
+        {"key": "phone", "is_enabled": True},
+        {"key": "image_1_url", "is_enabled": True, "is_custom": True},
+        {"key": "image_2_url", "is_enabled": True, "is_custom": True},
+        {"key": "image_3_url", "is_enabled": True, "is_custom": True},
+        {"key": "image_count", "is_enabled": True, "is_custom": True},
+    ]
+    raw_record = {
+        "place_id": "place-image-test",
+        "business_name": "Image Test Shop",
+        "phone": "9848022338",
+        "city": "Guntur",
+        "photos": [{"name": "photo-1"}, {"name": "photo-2"}],
+    }
+
+    with patch.object(GooglePlacesConnector, 'search', return_value=iter([raw_record])) as mock_search:
+        with patch.object(GooglePlacesConnector, 'fetch_photo_uri', side_effect=["https://photos.example/1", None]):
+            with patch.object(GooglePlacesConnector, 'is_configured', return_value=True):
+                worker.process_job(
+                    job_id="col_test_images",
+                    category="Shops",
+                    location="Guntur",
+                    target_count=1,
+                    source="google_places",
+                    preset_columns=columns,
+                )
+
+    search_options = mock_search.call_args.kwargs
+    assert search_options["include_photos"] is True
+    assert all(
+        (column.get("key") if isinstance(column, dict) else column) not in GooglePlacesPhotoMapper.IMAGE_FIELDS
+        for column in search_options["selected_columns"]
+    )
+    saved_doc = worker.progress_service.commit_batch.call_args.args[1][0]
+    assert saved_doc["image_1_url"] == "https://photos.example/1"
+    assert saved_doc["image_2_url"] is None
+    assert saved_doc["image_3_url"] is None
+    assert saved_doc["image_count"] == 1
+    assert "photos" not in saved_doc
 
 
 def test_google_places_legacy_error_diagnostic():
@@ -271,6 +390,9 @@ if __name__ == '__main__':
     print("RUNNING GOOGLE PLACES API (NEW) DEDICATED UNIT TESTS")
     print("=" * 70)
     test_google_places_new_success()
+    test_google_places_photo_media_uri_resolution()
+    test_google_places_photo_mapping_and_optional_photos()
+    test_collection_worker_persists_mapped_images()
     test_google_places_legacy_error_diagnostic()
     test_google_places_quota_error()
     test_collection_worker_failed_job_never_completed()
