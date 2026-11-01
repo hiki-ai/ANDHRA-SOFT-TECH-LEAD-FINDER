@@ -66,12 +66,17 @@ const validColumns = [
 ];
 
 const normalizedValid = validateAndNormalizeColumns(validColumns);
-assert.strictEqual(normalizedValid.length, 3, 'Should retain all 3 valid columns');
+assert.strictEqual(normalizedValid.length, 7, 'Should retain valid columns and append optional image fields');
 assert.strictEqual(normalizedValid[0].key, 'business_name');
 assert.strictEqual(normalizedValid[0].is_required, true, 'Business Name must always be required');
 assert.strictEqual(normalizedValid[2].key, 'gst_number');
 assert.strictEqual(normalizedValid[2].is_custom, true, 'Custom flag must be preserved');
 assert.strictEqual(normalizedValid[2].position, 2);
+assert.deepStrictEqual(
+  normalizedValid.slice(3).map((col) => col.key),
+  ['image_1_url', 'image_2_url', 'image_3_url', 'image_count']
+);
+assert.ok(normalizedValid.slice(3).every((col) => !col.is_enabled && !col.is_required));
 console.log('[PASS] 1. Valid column schema normalized with intact attributes and custom fields');
 
 // ------------------------------------------------------------------------------
@@ -244,8 +249,8 @@ assert.deepStrictEqual(
 assert.strictEqual(furnCols.find((c) => c.key === 'business_name').is_required, true);
 assert.strictEqual(furnCols.find((c) => c.key === 'phone').is_required, false);
 
-// Check total columns count (5 enabled + 11 disabled = 16)
-assert.strictEqual(furnCols.length, 16);
+// Check total columns count (5 enabled + 15 disabled = 20)
+assert.strictEqual(furnCols.length, 20);
 
 // Check Canonical preset structure
 assert.strictEqual(CANONICAL_FURNITURE_PRESET.id, 'preset_furniture_leads');

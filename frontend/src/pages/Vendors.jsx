@@ -451,6 +451,22 @@ export function Vendors() {
                             <span className="font-semibold text-surface-900 group-hover:text-brand-600 transition-colors">
                               {val}
                             </span>
+                          ) : col.key.startsWith('image_') && col.key.endsWith('_url') && val !== '—' ? (
+                            <a
+                              href={String(val)}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              title={`Open ${col.label}`}
+                              className="inline-flex items-center"
+                            >
+                              <img
+                                src={String(val)}
+                                alt={col.label}
+                                loading="lazy"
+                                className="h-9 w-12 rounded border border-surface-200 object-cover"
+                              />
+                            </a>
                           ) : col.key === 'website' && val !== '—' ? (
                             <a
                               href={String(val).startsWith('http') ? val : `https://${val}`}

@@ -27,6 +27,13 @@ VALID_DATA_TYPES = [
     'boolean',
 ]
 
+OPTIONAL_IMAGE_COLUMN_KEYS = {
+    'image_1_url',
+    'image_2_url',
+    'image_3_url',
+    'image_count',
+}
+
 # Canonical Default Columns mapping to existing database/vendor fields
 DEFAULT_COLUMNS: List[Dict[str, Any]] = [
     {
@@ -205,6 +212,50 @@ DEFAULT_COLUMNS: List[Dict[str, Any]] = [
         "is_custom": False,
         "description": "Record last updated timestamp",
     },
+    {
+        "key": "image_1_url",
+        "name": "image_1_url",
+        "label": "Image 1 URL",
+        "data_type": "url",
+        "position": 16,
+        "is_enabled": False,
+        "is_required": False,
+        "is_custom": False,
+        "description": "First available Google Places shop photo",
+    },
+    {
+        "key": "image_2_url",
+        "name": "image_2_url",
+        "label": "Image 2 URL",
+        "data_type": "url",
+        "position": 17,
+        "is_enabled": False,
+        "is_required": False,
+        "is_custom": False,
+        "description": "Second available Google Places shop photo",
+    },
+    {
+        "key": "image_3_url",
+        "name": "image_3_url",
+        "label": "Image 3 URL",
+        "data_type": "url",
+        "position": 18,
+        "is_enabled": False,
+        "is_required": False,
+        "is_custom": False,
+        "description": "Third available Google Places shop photo",
+    },
+    {
+        "key": "image_count",
+        "name": "image_count",
+        "label": "Image Count",
+        "data_type": "number",
+        "position": 19,
+        "is_enabled": False,
+        "is_required": False,
+        "is_custom": False,
+        "description": "Number of Google Places photos resolved, up to three",
+    },
 ]
 
 def build_furniture_leads_columns() -> List[Dict[str, Any]]:
@@ -246,12 +297,12 @@ def build_furniture_leads_columns() -> List[Dict[str, Any]]:
 
 
 def build_all_columns() -> List[Dict[str, Any]]:
-    """Constructs column definitions with all standard vendor attributes enabled."""
+    """Constructs standard columns, leaving photo enrichment opt-in."""
     columns = []
     for idx, base in enumerate(DEFAULT_COLUMNS):
         col = dict(base)
         col["position"] = idx
-        col["is_enabled"] = True
+        col["is_enabled"] = base["key"] not in OPTIONAL_IMAGE_COLUMN_KEYS
         col["is_required"] = (base["key"] == "business_name")
         columns.append(col)
     return columns
@@ -282,11 +333,14 @@ INITIAL_PRESETS: List[Dict[str, Any]] = [
     {
         "id": "preset_all_columns",
         "name": "All Columns (Standard)",
-        "description": "Complete vendor schema with all default attributes enabled.",
+        "description": "Complete vendor schema with optional shop photos available to enable.",
         "is_system": True,
         "is_default": False,
         "columns": build_all_columns(),
-        "enabled_columns": [c["key"] for c in DEFAULT_COLUMNS],
+        "enabled_columns": [
+            c["key"] for c in DEFAULT_COLUMNS
+            if c["key"] not in OPTIONAL_IMAGE_COLUMN_KEYS
+        ],
         "required_columns": ["business_name"],
         "extraction_config": {
             "source": "google_places",

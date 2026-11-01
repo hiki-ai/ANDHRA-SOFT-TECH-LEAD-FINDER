@@ -202,6 +202,50 @@ export const DEFAULT_COLUMNS = [
     is_custom: false,
     description: 'Record last updated timestamp',
   },
+  {
+    key: 'image_1_url',
+    name: 'image_1_url',
+    label: 'Image 1 URL',
+    data_type: 'url',
+    position: 16,
+    is_enabled: false,
+    is_required: false,
+    is_custom: false,
+    description: 'First available Google Places shop photo',
+  },
+  {
+    key: 'image_2_url',
+    name: 'image_2_url',
+    label: 'Image 2 URL',
+    data_type: 'url',
+    position: 17,
+    is_enabled: false,
+    is_required: false,
+    is_custom: false,
+    description: 'Second available Google Places shop photo',
+  },
+  {
+    key: 'image_3_url',
+    name: 'image_3_url',
+    label: 'Image 3 URL',
+    data_type: 'url',
+    position: 18,
+    is_enabled: false,
+    is_required: false,
+    is_custom: false,
+    description: 'Third available Google Places shop photo',
+  },
+  {
+    key: 'image_count',
+    name: 'image_count',
+    label: 'Image Count',
+    data_type: 'number',
+    position: 19,
+    is_enabled: false,
+    is_required: false,
+    is_custom: false,
+    description: 'Number of Google Places photos resolved, up to three',
+  },
 ];
 
 /**
@@ -338,6 +382,19 @@ export function validateAndNormalizeColumns(rawColumns, fallbackColumns = null) 
   }
 
   // Ensure consecutive zero-indexed positions
+  const photoColumnKeys = ['image_1_url', 'image_2_url', 'image_3_url', 'image_count'];
+  if (normalized.some((col) => col.key === 'business_name')) {
+    DEFAULT_COLUMNS.filter((col) => photoColumnKeys.includes(col.key) && !seenKeys.has(col.key))
+      .forEach((col) => {
+        normalized.push({
+          ...col,
+          position: normalized.length,
+          is_enabled: false,
+          is_required: false,
+        });
+      });
+  }
+
   return normalized.map((col, idx) => ({
     ...col,
     position: idx,
