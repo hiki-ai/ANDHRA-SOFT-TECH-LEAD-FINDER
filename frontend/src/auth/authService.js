@@ -13,7 +13,7 @@ import {
   onAuthStateChanged,
   updateProfile,
 } from 'firebase/auth';
-import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import {
   formatUser,
   getAuthErrorMessage,
@@ -107,6 +107,39 @@ export const authService = {
   },
 
   /**
+   * Safely retrieve user profile document from Cloud Firestore.
+   * Differentiates missing documents from network/offline errors, with bounded retries.
+   */
+  async fetchUserProfile(uid, { maxRetries = 2, delayMs = 1200 } = {}) {
+    if (!db || !uid) return { profile: null, isMissing: false, isOffline: false };
+
+    let attempts = 0;
+    while (attempts <= maxRetries) {
+      try {
+        const userDocRef = doc(db, 'users', uid);
+        const userDoc = await getDoc(userDocRef);
+        if (userDoc.exists()) {
+          return { profile: userDoc.data(), isMissing: false, isOffline: false };
+        } else {
+          // Explicit missing document
+          return { profile: null, isMissing: true, isOffline: false };
+        }
+      } catch (err) {
+        attempts++;
+        const isOffline =
+          err.code === 'unavailable' ||
+          (err.message && err.message.toLowerCase().includes('offline')) ||
+          (err.message && err.message.toLowerCase().includes('network'));
+        if (attempts > maxRetries) {
+          return { profile: null, isMissing: false, isOffline, error: err };
+        }
+        await new Promise((r) => setTimeout(r, delayMs * attempts));
+      }
+    }
+    return { profile: null, isMissing: false, isOffline: true };
+  },
+
+  /**
    * Log in with Email and Password
    */
   async loginWithEmailPassword(email, password) {
@@ -132,20 +165,29 @@ export const authService = {
         // ignore
       }
 
-      let role = (isSystemAdminEmail(cleanEmail) || hasAdminClaim) ? 'admin' : 'user';
-      let status = (isSystemAdminEmail(cleanEmail) || hasAdminClaim) ? 'active' : 'pending';
-      let fullName = user.displayName || '';
+      // Check cached session first so we never downgrade a verified user on transient network failure
+      const cached = this.getCachedUser();
+      const isMatchCached = cached && cached.uid === user.uid;
+
+      let role = (isSystemAdminEmail(cleanEmail) || hasAdminClaim) ? 'admin' : (isMatchCached ? cached.role : 'user');
+      let status = (isSystemAdminEmail(cleanEmail) || hasAdminClaim) ? 'active' : (isMatchCached ? cached.status : 'pending');
+      let fullName = user.displayName || (isMatchCached ? cached.fullName : '') || '';
 
       if (db) {
         try {
-          const userDoc = await getDoc(doc(db, 'users', user.uid));
-          if (userDoc.exists()) {
-            const data = userDoc.data();
-            const firestoreRole = (data.role || '').toLowerCase().trim();
-            const isAdminRole = firestoreRole === 'admin' || firestoreRole === 'administrator' || data.isAdmin === true;
+          const { profile, isMissing, isOffline, error } = await this.fetchUserProfile(user.uid, { maxRetries: 1 });
+          if (profile) {
+            const firestoreRole = (profile.role || '').toLowerCase().trim();
+            const isAdminRole = firestoreRole === 'admin' || firestoreRole === 'administrator' || profile.isAdmin === true;
             role = (isSystemAdminEmail(cleanEmail) || hasAdminClaim || isAdminRole) ? 'admin' : 'user';
-            status = data.status || status;
-            fullName = data.fullName || fullName;
+            status = profile.status || status;
+            fullName = profile.fullName || fullName;
+          } else if (isOffline) {
+            console.warn('[AuthService] Notice: Could not read Firestore profile during login (offline/network). Retaining verified session.');
+          } else if (isMissing) {
+            console.info('[AuthService] Notice: No Firestore profile exists for UID:', user.uid);
+          } else if (error) {
+            console.warn('[AuthService] Profile fetch notice:', error.message);
           }
         } catch (docErr) {
           console.warn('[AuthService] Notice: Could not read Firestore profile:', docErr.message);
@@ -181,11 +223,23 @@ export const authService = {
   },
 
   /**
-   * Listen to Firebase Auth state changes
+   * Listen to Firebase Auth state changes with real-time Firestore profile synchronization
    */
   subscribeToAuthChanges(callback) {
     if (isFirebaseConfigured && auth) {
-      return onAuthStateChanged(auth, async (firebaseUser) => {
+      let profileUnsubscribe = null;
+
+      const authUnsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+        // Clean up any existing profile listener on auth state transition
+        if (typeof profileUnsubscribe === 'function') {
+          try {
+            profileUnsubscribe();
+          } catch {
+            // ignore
+          }
+          profileUnsubscribe = null;
+        }
+
         if (firebaseUser) {
           try {
             const token = await firebaseUser.getIdToken();
@@ -198,35 +252,71 @@ export const authService = {
             }
 
             const cleanEmail = (firebaseUser.email || '').toLowerCase().trim();
+            const cached = this.getCachedUser();
+            const isMatchCached = cached && cached.uid === firebaseUser.uid;
 
-            let role = (isSystemAdminEmail(cleanEmail) || hasAdminClaim) ? 'admin' : 'user';
-            let status = (isSystemAdminEmail(cleanEmail) || hasAdminClaim) ? 'active' : 'pending';
-            let fullName = firebaseUser.displayName || '';
+            let role = (isSystemAdminEmail(cleanEmail) || hasAdminClaim) ? 'admin' : (isMatchCached ? cached.role : 'user');
+            let status = (isSystemAdminEmail(cleanEmail) || hasAdminClaim) ? 'active' : (isMatchCached ? cached.status : 'pending');
+            let fullName = firebaseUser.displayName || (isMatchCached ? cached.fullName : '') || '';
 
-            if (db) {
-              try {
-                const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-                if (userDoc.exists()) {
-                  const data = userDoc.data();
-                  const firestoreRole = (data.role || '').toLowerCase().trim();
-                  const isAdminRole = firestoreRole === 'admin' || firestoreRole === 'administrator' || data.isAdmin === true;
-                  role = (isSystemAdminEmail(cleanEmail) || hasAdminClaim || isAdminRole) ? 'admin' : 'user';
-                  status = data.status || status;
-                  fullName = data.fullName || fullName;
-                }
-              } catch (docErr) {
-                console.warn('[AuthService] Notice: Could not read Firestore profile in subscriber:', docErr.message);
-              }
-            }
-
-            const formatted = formatUser(firebaseUser, {
+            // Emit initial user session immediately from cached/system state so UI is responsive
+            const initialFormatted = formatUser(firebaseUser, {
               fullName,
               role,
               status,
               token,
             });
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(formatted));
-            callback(formatted);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(initialFormatted));
+            callback(initialFormatted);
+
+            // If Firestore is available, attach real-time onSnapshot listener for live profile updates
+            if (db) {
+              try {
+                const userDocRef = doc(db, 'users', firebaseUser.uid);
+                profileUnsubscribe = onSnapshot(
+                  userDocRef,
+                  { includeMetadataChanges: false },
+                  (snapshot) => {
+                    if (snapshot.exists()) {
+                      const data = snapshot.data() || {};
+                      const firestoreRole = (data.role || '').toLowerCase().trim();
+                      const isAdminRole = firestoreRole === 'admin' || firestoreRole === 'administrator' || data.isAdmin === true;
+                      role = (isSystemAdminEmail(cleanEmail) || hasAdminClaim || isAdminRole) ? 'admin' : 'user';
+                      status = data.status || status;
+                      fullName = data.fullName || fullName;
+
+                      const updated = formatUser(firebaseUser, {
+                        fullName,
+                        role,
+                        status,
+                        token,
+                      });
+                      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+                      callback(updated);
+                    } else {
+                      console.info('[AuthService] Profile document does not exist in Firestore for UID:', firebaseUser.uid);
+                    }
+                  },
+                  (snapErr) => {
+                    console.warn('[AuthService] Notice: Could not read Firestore profile in subscriber:', snapErr.message);
+                    // NEVER treat a failed network request / offline error as an empty profile!
+                    // Retain verified cached state:
+                    if (isMatchCached && cached.role) {
+                      const fallback = formatUser(firebaseUser, {
+                        fullName: cached.fullName || fullName,
+                        role: cached.role,
+                        status: cached.status || status,
+                        token,
+                      });
+                      localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback));
+                      callback(fallback);
+                    }
+                  }
+                );
+              } catch (listenErr) {
+                console.warn('[AuthService] Notice: Failed to attach realtime profile listener:', listenErr.message);
+              }
+            }
           } catch (err) {
             console.error('[AuthService] Failed to retrieve fresh ID token:', err);
             localStorage.removeItem(STORAGE_KEY);
@@ -237,6 +327,23 @@ export const authService = {
           callback(null);
         }
       });
+
+      return () => {
+        if (typeof profileUnsubscribe === 'function') {
+          try {
+            profileUnsubscribe();
+          } catch {
+            // ignore
+          }
+        }
+        if (typeof authUnsubscribe === 'function') {
+          try {
+            authUnsubscribe();
+          } catch {
+            // ignore
+          }
+        }
+      };
     }
 
     // If Firebase is not configured, load from localStorage if exists

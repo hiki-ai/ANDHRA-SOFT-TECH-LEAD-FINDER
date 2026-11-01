@@ -4,9 +4,21 @@
  */
 
 export const SYSTEM_ADMIN_EMAIL = 'admin@andhrasofttech.com';
+export const SYSTEM_ADMIN_EMAILS = [
+  'admin@andhrasofttech.com',
+  'yarnagulaabhiram123@gmail.com',
+];
+
+export function getSystemAdminEmails() {
+  const envAdmins = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_EMAILS) || '';
+  const parsed = envAdmins.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+  return Array.from(new Set([...SYSTEM_ADMIN_EMAILS, ...parsed]));
+}
 
 export function isSystemAdminEmail(email) {
-  return (email || '').trim().toLowerCase() === SYSTEM_ADMIN_EMAIL;
+  if (!email) return false;
+  const clean = email.trim().toLowerCase();
+  return getSystemAdminEmails().includes(clean);
 }
 
 export function formatUser(user, extra = {}) {

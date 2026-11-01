@@ -13,7 +13,12 @@
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  getFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 export const firebaseConfig = {
@@ -43,7 +48,25 @@ if (isFirebaseConfigured) {
   try {
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     auth = getAuth(app);
-    db = getFirestore(app);
+
+    // Initialize Firestore with auto-detect long-polling to prevent WebChannel timeout
+    // and "client is offline" errors across diverse networks/proxies, plus multi-tab cache
+    try {
+      db = initializeFirestore(app, {
+        experimentalAutoDetectLongPolling: true,
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      });
+    } catch (fsInitErr) {
+      // Fallback if Firestore was already initialized (e.g., during Vite HMR) or unsupported
+      try {
+        db = getFirestore(app);
+      } catch (getDbErr) {
+        console.error('[Firebase] Firestore initialization fallback error:', getDbErr.message);
+      }
+    }
+
     storage = getStorage(app);
     console.info('[Firebase] Successfully initialized Firebase App, Auth & Firestore for project:', firebaseConfig.projectId);
   } catch (error) {

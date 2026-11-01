@@ -48,7 +48,7 @@ class Settings:
     # Admin Authorization Allowlist
     ADMIN_EMAILS = [
         email.strip().lower()
-        for email in (os.getenv('ADMIN_EMAILS') or os.getenv('ADMIN_EMAIL') or 'admin@andhrasofttech.com').split(',')
+        for email in (os.getenv('ADMIN_EMAILS') or os.getenv('ADMIN_EMAIL') or 'admin@andhrasofttech.com,yarnagulaabhiram123@gmail.com').split(',')
         if email.strip()
     ]
 
@@ -104,7 +104,7 @@ class Settings:
 
     @classmethod
     def get_admin_emails(cls) -> list:
-        raw = os.getenv('ADMIN_EMAILS') or os.getenv('ADMIN_EMAIL') or 'admin@andhrasofttech.com'
+        raw = os.getenv('ADMIN_EMAILS') or os.getenv('ADMIN_EMAIL') or 'admin@andhrasofttech.com,yarnagulaabhiram123@gmail.com'
         raw = raw.strip().strip('[]"\'')
         emails = [e.strip().strip('"\'').lower() for e in raw.split(',') if e.strip()]
         return emails if emails else [e.strip().lower() for e in cls.ADMIN_EMAILS]

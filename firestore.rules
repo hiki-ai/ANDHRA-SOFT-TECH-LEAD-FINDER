@@ -7,11 +7,13 @@ service cloud.firestore {
       return request.auth != null;
     }
     
-    // Helper function to verify admin privilege via custom claim or admin email
+    // Helper function to verify admin privilege via custom claim, admin email, or Firestore profile role
     function isAdmin() {
       return isAuthenticated() && (
         request.auth.token.admin == true ||
-        request.auth.token.email in ['admin@andhrasofttech.com']
+        request.auth.token.email in ['admin@andhrasofttech.com', 'yarnagulaabhiram123@gmail.com'] ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
       );
     }
 
@@ -50,6 +52,12 @@ service cloud.firestore {
     match /categories/{categoryId} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated();
+    }
+
+    // Metadata: Read allowed for authenticated users
+    match /metadata/{metaId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
 
     // Import/Export Jobs: Admin only

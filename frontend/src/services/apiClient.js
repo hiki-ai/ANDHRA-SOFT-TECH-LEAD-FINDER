@@ -130,11 +130,12 @@ apiClient.interceptors.response.use(
       friendlyMessage = `Unable to connect to backend at ${API_CONFIG.baseURL}. Please verify the Render backend service is running and CORS is allowed.`;
     }
 
-    const errorResponse = {
-      status: status || 0,
-      code: serverError?.code || (status ? `HTTP_${status}` : 'NETWORK_ERROR'),
-      message: friendlyMessage,
-    };
+    const isNetwork = error.code === 'ERR_NETWORK' || error.message === 'Network Error';
+    const errorResponse = new Error(friendlyMessage);
+    errorResponse.status = status || 0;
+    errorResponse.code = serverError?.code || (status ? `HTTP_${status}` : (isNetwork ? 'NETWORK_ERROR' : 'API_ERROR'));
+    errorResponse.isNetworkError = isNetwork;
+    errorResponse.response = error.response;
 
     return Promise.reject(errorResponse);
   }

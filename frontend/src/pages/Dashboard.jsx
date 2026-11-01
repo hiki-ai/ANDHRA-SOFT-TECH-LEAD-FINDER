@@ -131,7 +131,7 @@ export function Dashboard() {
       }
     } catch (err) {
       if (!isMountedRef.current) return;
-      console.error('[Dashboard] Error fetching telemetry:', err);
+      console.error('[Dashboard] Error fetching telemetry:', err?.message || err);
 
       const status = err?.status;
       let friendlyMsg;
@@ -140,6 +140,8 @@ export function Dashboard() {
         friendlyMsg = 'Session expired or unauthorized. Please re-authenticate as an administrator.';
       } else if (status === 403) {
         friendlyMsg = err?.message || 'Access denied (HTTP 403 Forbidden). Administrator privileges are required to view live telemetry.';
+      } else if (err?.isNetworkError || status === 0) {
+        friendlyMsg = err?.message || 'Backend API service is unreachable. Please verify the backend service is running and CORS is configured.';
       } else {
         friendlyMsg = err?.message || 'Failed to load live database telemetry. Please ensure the backend API is running.';
       }

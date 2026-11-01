@@ -16,7 +16,13 @@ export const dashboardService = {
    */
   async getStats() {
     const res = await apiClient.get('/api/v1/dashboard/stats');
-    return res?.data || res;
+    if (res && typeof res === 'object') {
+      if (res.data && typeof res.data === 'object' && ('total_vendors' in res.data || 'total_collections' in res.data)) {
+        return res.data;
+      }
+      return res;
+    }
+    return res;
   },
 };
 
