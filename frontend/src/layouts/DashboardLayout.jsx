@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, lazy, Suspense } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from '../components/navigation/Sidebar';
 import { Navbar } from '../components/navigation/Navbar';
-import { QuickCollectionModal } from '../components/dashboard/QuickCollectionModal';
+
+// Lazy-load large collection modal only when opened
+const QuickCollectionModal = lazy(() => import('../components/dashboard/QuickCollectionModal'));
 
 export function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -31,11 +33,15 @@ export function DashboardLayout() {
         </main>
       </div>
 
-      {/* Quick Collection Modal */}
-      <QuickCollectionModal
-        isOpen={collectionModalOpen}
-        onClose={() => setCollectionModalOpen(false)}
-      />
+      {/* Quick Collection Modal (Loaded dynamically on demand) */}
+      {collectionModalOpen && (
+        <Suspense fallback={null}>
+          <QuickCollectionModal
+            isOpen={collectionModalOpen}
+            onClose={() => setCollectionModalOpen(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

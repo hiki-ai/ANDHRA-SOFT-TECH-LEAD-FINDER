@@ -16,10 +16,9 @@ import { getAuth } from 'firebase/auth';
 import {
   initializeFirestore,
   getFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
 } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
+// Storage omitted to eliminate unused bundle weight
+// import { getStorage } from 'firebase/storage';
 
 export const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDaGxyFJv2S8GVrqw1Cj1yAqe8SR8bz4jU",
@@ -54,9 +53,6 @@ if (isFirebaseConfigured) {
     try {
       db = initializeFirestore(app, {
         experimentalAutoDetectLongPolling: true,
-        localCache: persistentLocalCache({
-          tabManager: persistentMultipleTabManager(),
-        }),
       });
     } catch (fsInitErr) {
       // Fallback if Firestore was already initialized (e.g., during Vite HMR) or unsupported
@@ -67,7 +63,7 @@ if (isFirebaseConfigured) {
       }
     }
 
-    storage = getStorage(app);
+    storage = null;
     console.info('[Firebase] Successfully initialized Firebase App, Auth & Firestore for project:', firebaseConfig.projectId);
   } catch (error) {
     console.error('[Firebase] Initialization error:', error.message);
