@@ -1,15 +1,19 @@
 import time
 from datetime import datetime, timezone
 from flask import Blueprint, jsonify, request
-from ..middleware.firebase_auth import require_auth
+from ..middleware.firebase_auth import require_auth, require_user_auth
 from ..config.firebase import get_firestore_db
 from ..config.settings import Settings
 
 collection_bp = Blueprint('collections', __name__, url_prefix='/api/v1/collections')
 
 @collection_bp.route('', methods=['GET'])
-@require_auth
+@require_user_auth
 def list_collections():
+    user = getattr(request, 'current_user', {})
+    user_id = user.get('uid')
+    is_admin = user.get('role') == 'admin'
+
     db = get_firestore_db()
     col_ref = db.collection('collections')
 
@@ -19,6 +23,9 @@ def list_collections():
         for doc in docs:
             data = doc.to_dict()
             if not data:
+                continue
+            # Data privacy isolation: non-admin user only sees their own collections
+            if not is_admin and data.get('user_id') and data.get('user_id') != user_id:
                 continue
             data['id'] = doc.id
             if not data.get('source_name'):
@@ -39,8 +46,12 @@ def list_collections():
     })
 
 @collection_bp.route('/<collection_id>', methods=['GET'])
-@require_auth
+@require_user_auth
 def get_collection(collection_id):
+    user = getattr(request, 'current_user', {})
+    user_id = user.get('uid')
+    is_admin = user.get('role') == 'admin'
+
     db = get_firestore_db()
     doc = db.collection('collections').document(collection_id).get()
 
@@ -48,6 +59,10 @@ def get_collection(collection_id):
         return jsonify({"success": False, "error": {"code": "NOT_FOUND", "message": "Collection not found"}}), 404
 
     data = doc.to_dict()
+    # Data privacy check
+    if not is_admin and data.get('user_id') and data.get('user_id') != user_id:
+        return jsonify({"success": False, "error": {"code": "FORBIDDEN", "message": "Access denied to this collection"}}), 403
+
     data['id'] = doc.id
     if not data.get('source_name'):
         data['source_name'] = data.get('current_source') or (
@@ -60,8 +75,12 @@ def get_collection(collection_id):
     })
 
 @collection_bp.route('', methods=['POST'])
-@require_auth
+@require_user_auth
 def create_collection():
+    user = getattr(request, 'current_user', {})
+    user_id = user.get('uid')
+    is_admin = user.get('role') == 'admin'
+
     payload = request.get_json() or {}
     category = payload.get('category')
     location = payload.get('location')
@@ -71,6 +90,45 @@ def create_collection():
 
     if not category or not location:
         return jsonify({"success": False, "error": {"code": "VALIDATION_ERROR", "message": "Category and location are required"}}), 400
+
+    # Enforce trial & plan limits for regular customers
+    if not is_admin and user_id:
+        from ..services.trial_service import TrialService
+        can_proceed, remaining, reason = TrialService.check_extraction_allowance(user_id)
+        if not can_proceed:
+            if reason == "trial_limit_reached":
+                return jsonify({
+                    "success": False,
+                    "error": {
+                        "code": "TRIAL_LIMIT_REACHED",
+                        "message": "Free Trial limit of 30 unique records reached. Please upgrade to a premium subscription to extract more leads."
+                    }
+                }), 403
+            elif reason == "trial_expired":
+                return jsonify({
+                    "success": False,
+                    "error": {
+                        "code": "TRIAL_EXPIRED",
+                        "message": "Your Free Trial period has expired. Please upgrade to a premium plan to continue extraction."
+                    }
+                }), 403
+            elif reason == "no_trial_or_subscription":
+                return jsonify({
+                    "success": False,
+                    "error": {
+                        "code": "SUBSCRIPTION_REQUIRED",
+                        "message": "An active subscription or free trial is required to start lead extraction."
+                    }
+                }), 403
+            elif reason == "subscription_limit_reached":
+                return jsonify({
+                    "success": False,
+                    "error": {
+                        "code": "PLAN_LIMIT_REACHED",
+                        "message": "Your monthly plan extraction limit has been reached. Please upgrade your plan."
+                    }
+                }), 403
+        target_count = min(target_count, remaining)
 
     db = get_firestore_db()
     job_id = f"col_{int(time.time() * 1000)}"
@@ -139,6 +197,7 @@ def create_collection():
     if not connector_ready:
         job_doc = {
             "id": job_id,
+            "user_id": user_id,
             "category": category,
             "location": location,
             "target_count": target_count,
@@ -172,6 +231,7 @@ def create_collection():
 
     job_doc = {
         "id": job_id,
+        "user_id": user_id,
         "category": category,
         "location": location,
         "target_count": target_count,
@@ -209,6 +269,7 @@ def create_collection():
                 worker_endpoint,
                 json={
                     "job_id": job_id,
+                    "user_id": user_id,
                     "category": category,
                     "location": location,
                     "target_count": target_count,
@@ -232,7 +293,8 @@ def create_collection():
                     target_count,
                     source=source,
                     preset_id=preset_id,
-                    preset_columns=preset_columns
+                    preset_columns=preset_columns,
+                    user_id=user_id
                 )
             except Exception as thread_err:
                 print(f"[CollectionRoutes] Worker thread execution error: {thread_err}")
@@ -256,21 +318,21 @@ def create_collection():
     }), 201
 
 @collection_bp.route('/<collection_id>/pause', methods=['POST'])
-@require_auth
+@require_user_auth
 def pause_collection(collection_id):
     db = get_firestore_db()
     db.collection('collections').document(collection_id).update({"status": "paused"})
     return jsonify({"success": True, "message": "Collection paused"})
 
 @collection_bp.route('/<collection_id>/resume', methods=['POST'])
-@require_auth
+@require_user_auth
 def resume_collection(collection_id):
     db = get_firestore_db()
     db.collection('collections').document(collection_id).update({"status": "running"})
     return jsonify({"success": True, "message": "Collection resumed"})
 
 @collection_bp.route('/<collection_id>/cancel', methods=['POST'])
-@require_auth
+@require_user_auth
 def cancel_collection(collection_id):
     db = get_firestore_db()
     db.collection('collections').document(collection_id).update({"status": "cancelled"})

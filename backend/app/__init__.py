@@ -21,6 +21,12 @@ from .routes.column_routes import column_bp
 from .routes.source_routes import source_bp
 from .routes.preset_routes import preset_bp
 from .routes.category_routes import category_bp
+from .routes.plan_routes import plan_bp, public_bp
+from .routes.trial_routes import trial_bp
+from .routes.subscription_routes import sub_bp
+from .routes.payment_routes import payment_bp
+from .routes.user_routes import user_bp
+from .routes.admin_billing_routes import admin_billing_bp
 
 def create_app(config_name=None):
     app = Flask(__name__)
@@ -85,6 +91,24 @@ def create_app(config_name=None):
     app.register_blueprint(source_bp)
     app.register_blueprint(preset_bp)
     app.register_blueprint(category_bp)
+
+    # Register SaaS Premium Billing & Subscription Blueprints
+    app.register_blueprint(plan_bp)
+    app.register_blueprint(public_bp)
+    app.register_blueprint(trial_bp)
+    app.register_blueprint(sub_bp)
+    app.register_blueprint(payment_bp)
+    app.register_blueprint(user_bp)
+    app.register_blueprint(admin_billing_bp)
+
+    # Register /api/v1 aliases for SaaS endpoints for uniform frontend access
+    app.register_blueprint(plan_bp, name='plans_v1_alias', url_prefix='/api/v1/plans')
+    app.register_blueprint(public_bp, name='public_v1_alias', url_prefix='/api/v1/public')
+    app.register_blueprint(trial_bp, name='trial_v1_alias', url_prefix='/api/v1/trial')
+    app.register_blueprint(sub_bp, name='sub_v1_alias', url_prefix='/api/v1/subscriptions')
+    app.register_blueprint(payment_bp, name='payment_v1_alias', url_prefix='/api/v1/payments')
+    app.register_blueprint(user_bp, name='user_v1_alias', url_prefix='/api/v1/user')
+    app.register_blueprint(admin_billing_bp, name='admin_billing_v1_alias', url_prefix='/api/v1/admin')
 
     # Register un-prefixed aliases for maximum resilience
     app.register_blueprint(auth_bp, name='auth_alias', url_prefix='/auth')

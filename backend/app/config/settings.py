@@ -118,7 +118,31 @@ class Settings:
     # Source Connector Credentials
     GOOGLE_MAPS_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY', os.getenv('GOOGLE_PLACES_API_KEY', '')).strip()
     JUSTDIAL_API_KEY = os.getenv('JUSTDIAL_API_KEY', '').strip()
+    # Source Connector Credentials
+    GOOGLE_MAPS_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY', os.getenv('GOOGLE_PLACES_API_KEY', '')).strip()
+    JUSTDIAL_API_KEY = os.getenv('JUSTDIAL_API_KEY', '').strip()
     MAGICPIN_API_KEY = os.getenv('MAGICPIN_API_KEY', '').strip()
+
+    # Razorpay Payment Gateway Credentials
+    RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', '').strip()
+    RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', '').strip()
+    RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', '').strip()
+
+    @classmethod
+    def get_razorpay_key_id(cls) -> str:
+        return (os.getenv('RAZORPAY_KEY_ID') or cls.RAZORPAY_KEY_ID or '').strip()
+
+    @classmethod
+    def get_razorpay_key_secret(cls) -> str:
+        return (os.getenv('RAZORPAY_KEY_SECRET') or cls.RAZORPAY_KEY_SECRET or '').strip()
+
+    @classmethod
+    def get_razorpay_webhook_secret(cls) -> str:
+        return (os.getenv('RAZORPAY_WEBHOOK_SECRET') or cls.RAZORPAY_WEBHOOK_SECRET or '').strip()
+
+    @classmethod
+    def is_razorpay_configured(cls) -> bool:
+        return bool(cls.get_razorpay_key_id() and cls.get_razorpay_key_secret())
 
     @classmethod
     def get_google_maps_api_key(cls) -> str:

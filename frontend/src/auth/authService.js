@@ -65,7 +65,7 @@ export const authService = {
     // Determine role and status: public registrations are ALWAYS restricted to 'user' / 'pending'
     const isSystemAdmin = isSystemAdminEmail(cleanEmail);
     const assignedRole = isSystemAdmin ? 'admin' : 'user';
-    const assignedStatus = isSystemAdmin ? 'active' : 'pending';
+    const assignedStatus = 'active';
 
     const profileData = {
       uid: user.uid,

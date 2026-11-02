@@ -43,7 +43,7 @@ export function Register() {
       if (role === 'admin') {
         navigate('/dashboard', { replace: true });
       } else {
-        navigate('/pending-approval', { replace: true });
+        navigate('/app', { replace: true });
       }
     }
   }, [authLoading, isAuthenticated, role, navigate]);
@@ -111,7 +111,7 @@ export function Register() {
       if (newUser.role === 'admin') {
         navigate('/dashboard', { replace: true });
       } else {
-        navigate('/pending-approval', { replace: true });
+        navigate('/app', { replace: true });
       }
     } catch (err) {
       setSubmitError(err.message || 'Registration failed. Please check your information.');

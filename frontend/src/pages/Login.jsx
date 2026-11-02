@@ -17,15 +17,15 @@ export function Login() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const from = location.state?.from?.pathname || '/dashboard';
+  const from = location.state?.from?.pathname || (role === 'admin' ? '/dashboard' : '/app');
 
   // Automatically redirect authenticated users according to their assigned role
   React.useEffect(() => {
     if (!authLoading && isAuthenticated) {
       if (role === 'admin') {
-        navigate(from, { replace: true });
+        navigate(from.startsWith('/app') ? '/dashboard' : from, { replace: true });
       } else {
-        navigate('/pending-approval', { replace: true });
+        navigate('/app', { replace: true });
       }
     }
   }, [authLoading, isAuthenticated, role, navigate, from]);
@@ -47,11 +47,11 @@ export function Login() {
     try {
       const loggedIn = await login(email.trim(), password);
       if (loggedIn.role === 'admin') {
-        toast.success('Authentication successful. Welcome to Lead Finder.');
-        navigate(from, { replace: true });
+        toast.success('Authentication successful. Welcome to Admin Dashboard.');
+        navigate('/dashboard', { replace: true });
       } else {
-        toast.info('Signed in. Account is pending administrator review.');
-        navigate('/pending-approval', { replace: true });
+        toast.success('Signed in successfully! Welcome to your customer workspace.');
+        navigate('/app', { replace: true });
       }
     } catch (err) {
       setError(err.message || 'Authentication failed. Please check credentials.');

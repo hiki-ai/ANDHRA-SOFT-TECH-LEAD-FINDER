@@ -48,7 +48,8 @@ class CollectionWorker:
         target_count: int = 1000,
         source: str = "google_places",
         preset_id: Optional[str] = None,
-        preset_columns: Optional[list] = None
+        preset_columns: Optional[list] = None,
+        user_id: Optional[str] = None
     ):
         """
         Processes a real lead collection job lifecycle:
@@ -77,6 +78,7 @@ class CollectionWorker:
                     cd = c_doc.to_dict()
                     preset_id = preset_id or cd.get('preset_id')
                     preset_columns = preset_columns or cd.get('preset_columns')
+                    user_id = user_id or cd.get('user_id')
             except Exception as e:
                 print(f"[CollectionWorker] Preset snapshot preload notice: {e}")
 
@@ -125,6 +127,7 @@ class CollectionWorker:
         valid_count = 0
         duplicate_count = 0
         failed_count = 0
+        trial_limit_reached = False
 
         # Determine set of selected column keys from preset snapshot
         selected_keys = set()
@@ -190,6 +193,17 @@ class CollectionWorker:
                     valid_count += 1
                     status = 'valid'
                     existing_keys.add(dedupe_key)
+                    if user_id:
+                        try:
+                            from app.services.trial_service import TrialService
+                            trial = TrialService.get_user_trial(user_id)
+                            if trial and trial.get('trial_status') == 'active':
+                                TrialService.record_trial_unique_records(user_id, [dedupe_key])
+                                t_current = TrialService.get_user_trial(user_id)
+                                if t_current and t_current.get('trial_remaining', 0) <= 0:
+                                    trial_limit_reached = True
+                        except Exception as t_err:
+                            pass
 
                 doc_id = f"ven_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
 
@@ -197,6 +211,7 @@ class CollectionWorker:
                 vendor_doc = {
                     "id": doc_id,
                     "collection_id": job_id,
+                    "user_id": user_id,
                     "preset_id": preset_id,
                     "dedupe_key": dedupe_key,
                     "status": status,
@@ -241,6 +256,28 @@ class CollectionWorker:
                             vendor_doc["custom_fields"][image_field] = vendor_doc[image_field]
 
                 batch.append(vendor_doc)
+
+                if trial_limit_reached:
+                    if batch:
+                        self.progress_service.commit_batch(job_id, batch)
+                        batch = []
+                    now_pause_iso = datetime.now(timezone.utc).isoformat()
+                    self.progress_service.update_job_progress(job_id, {
+                        "status": "paused",
+                        "error_message": "Free Trial limit of 30 unique records reached. Please upgrade to a premium plan to continue extraction.",
+                        "found": found_count,
+                        "found_count": found_count,
+                        "valid": valid_count,
+                        "valid_count": valid_count,
+                        "duplicate": duplicate_count,
+                        "duplicate_count": duplicate_count,
+                        "failed": failed_count,
+                        "failed_count": failed_count,
+                        "progress": 100,
+                        "updated_at": now_pause_iso,
+                    })
+                    print(f"[CollectionWorker] Job {job_id} paused: Free Trial limit reached.")
+                    return
 
                 # Batch commit every 50 records or target reached
                 if len(batch) >= 50 or found_count >= target_count:

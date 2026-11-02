@@ -17,6 +17,51 @@ service cloud.firestore {
       );
     }
 
+    // Plans: Public read access for marketing and pricing page; write strictly restricted to admin
+    match /plans/{planId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Trials: Users can read only their own trial; write managed server-side by backend
+    match /trials/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // Subscriptions: Users can read only their own subscriptions; write managed server-side by backend
+    match /subscriptions/{subId} {
+      allow read: if isAuthenticated() && (
+        resource.data.user_id == request.auth.uid || isAdmin()
+      );
+      allow write: if isAdmin();
+    }
+
+    // Payments: Users can read only their own payments; write managed server-side by backend
+    match /payments/{paymentId} {
+      allow read: if isAuthenticated() && (
+        resource.data.user_id == request.auth.uid || isAdmin()
+      );
+      allow write: if isAdmin();
+    }
+
+    // Payment Webhooks: Server-side only
+    match /payment_webhooks/{webhookId} {
+      allow read, write: if false;
+    }
+
+    // Admin Settings: Public read of safe pricing settings; writes admin-only
+    match /admin_settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Admin Audit Logs: Read by admin only; writes server-side only
+    match /admin_audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     // Vendors: Read allowed for authenticated users; writes strictly restricted to verified admin
     // Note: Production operations primarily route through Flask REST API with Firebase Admin SDK
     match /vendors/{vendorId} {
@@ -24,9 +69,11 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Collections & extraction jobs: Read allowed for authenticated users; writes restricted to admin
+    // Collections & extraction jobs: Read allowed for owner or admin; writes restricted to owner or admin
     match /collections/{collectionId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && (
+        resource.data.user_id == request.auth.uid || isAdmin()
+      );
       allow write: if isAdmin();
     }
 
@@ -76,7 +123,7 @@ service cloud.firestore {
 
     // User Profiles:
     // Any authenticated user can read their own profile; admins can read all profiles.
-    // Users can create their own profile document with role 'user' (never admin) and status 'pending'.
+    // Users can create their own profile document with role 'user' (never admin) and status 'active' or 'pending'.
     // Only verified admins can promote users or modify roles.
     match /users/{userId} {
       allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());

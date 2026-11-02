@@ -59,18 +59,30 @@ class InMemoryFirestoreCollection:
         return InMemoryDocRef(self, doc_id)
 
     def where(self, field, op, val):
-        return self
+        col = InMemoryFirestoreCollection(self.name)
+        if op == '==':
+            col.items = [i for i in self.items if i.get(field) == val]
+        elif op == 'in':
+            col.items = [i for i in self.items if i.get(field) in val]
+        else:
+            col.items = list(self.items)
+        return col
 
     def limit(self, count):
-        return self
+        col = InMemoryFirestoreCollection(self.name)
+        col.items = self.items[:count]
+        return col
 
     def offset(self, count):
-        return self
+        col = InMemoryFirestoreCollection(self.name)
+        col.items = self.items[count:]
+        return col
 
     def order_by(self, field, direction=None):
         return self
 
 class InMemoryDoc:
+    exists = True
     def __init__(self, doc_id, data):
         self.id = doc_id
         self._data = data

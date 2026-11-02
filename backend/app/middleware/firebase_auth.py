@@ -252,3 +252,135 @@ def require_auth(f):
             }), 401
 
     return decorated_function
+
+require_admin = require_auth
+
+
+def require_user_auth(f):
+    """
+    Verifies Firebase ID token for ANY authenticated user (regular user or admin).
+    Does NOT require administrator privilege.
+    """
+    @functools.wraps(f)
+    def decorated_function(*args, **kwargs):
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({
+                "success": False,
+                "error": {
+                    "code": "AUTH_REQUIRED",
+                    "message": "Authorization header missing or invalid. Format: 'Bearer <firebase_id_token>'"
+                }
+            }), 401
+
+        token = auth_header.split('Bearer ', 1)[1].strip()
+        if not token:
+            return jsonify({
+                "success": False,
+                "error": {"code": "AUTH_REQUIRED", "message": "Bearer token must not be empty"}
+            }), 401
+
+        # Allow explicit test tokens when TESTING mode is active
+        if Settings.TESTING:
+            if token == "test_admin_token":
+                admin_emails = Settings.get_admin_emails()
+                request.current_user = {
+                    "uid": "test_admin_uid",
+                    "email": admin_emails[0] if admin_emails else "admin@andhrasofttech.com",
+                    "role": "admin"
+                }
+                return f(*args, **kwargs)
+            elif token == "test_user_token":
+                request.current_user = {
+                    "uid": "test_user_uid",
+                    "email": "test_user@example.com",
+                    "role": "user"
+                }
+                return f(*args, **kwargs)
+            elif token.startswith("test_user_"):
+                uid = token.replace("test_", "")
+                request.current_user = {
+                    "uid": uid,
+                    "email": f"{uid}@example.com",
+                    "role": "user"
+                }
+                return f(*args, **kwargs)
+
+        init_firebase_admin()
+        import firebase_admin
+        from firebase_admin import auth
+
+        if firebase_admin._apps and is_live_firestore():
+            try:
+                decoded_token = auth.verify_id_token(token)
+                email = (
+                    decoded_token.get('email') or
+                    decoded_token.get('firebase', {}).get('identities', {}).get('email', [None])[0] or
+                    ''
+                ).strip().lower()
+                uid = decoded_token.get('uid') or decoded_token.get('user_id') or decoded_token.get('sub')
+                admin_emails = Settings.get_admin_emails()
+                admin_uids = Settings.get_admin_uids()
+                is_admin = bool(
+                    decoded_token.get('admin') is True or
+                    str(decoded_token.get('role', '')).lower() == 'admin' or
+                    (email and email in admin_emails) or
+                    (uid and uid in admin_uids)
+                )
+                request.current_user = {
+                    "uid": uid,
+                    "email": email,
+                    "role": "admin" if is_admin else "user",
+                    "claims": decoded_token
+                }
+                return f(*args, **kwargs)
+            except auth.ExpiredIdTokenError:
+                return jsonify({
+                    "success": False,
+                    "error": {"code": "AUTH_INVALID_TOKEN", "message": "Firebase ID token has expired. Please refresh session and try again."}
+                }), 401
+            except Exception as e:
+                return jsonify({
+                    "success": False,
+                    "error": {"code": "AUTH_INVALID_TOKEN", "message": "Invalid or expired Firebase ID token."}
+                }), 401
+        else:
+            # Fallback for local development
+            if token.startswith("ey"):
+                import base64
+                import json
+                try:
+                    payload_part = token.split('.')[1]
+                    padded = payload_part + '=' * (-len(payload_part) % 4)
+                    claims = json.loads(base64.urlsafe_b64decode(padded.encode('utf-8')).decode('utf-8'))
+                    email = (claims.get('email') or '').strip().lower()
+                    uid = claims.get('user_id') or claims.get('sub') or claims.get('uid') or 'local_user'
+                    admin_emails = Settings.get_admin_emails()
+                    admin_uids = Settings.get_admin_uids()
+                    is_admin = bool(
+                        claims.get('admin') is True or
+                        str(claims.get('role', '')).lower() == 'admin' or
+                        (email and email in admin_emails) or
+                        (uid and uid in admin_uids)
+                    )
+                    request.current_user = {
+                        "uid": uid,
+                        "email": email,
+                        "role": "admin" if is_admin else "user",
+                        "claims": claims
+                    }
+                    return f(*args, **kwargs)
+                except Exception:
+                    pass
+
+            return jsonify({
+                "success": False,
+                "error": {
+                    "code": "AUTH_INVALID_TOKEN",
+                    "message": "Firebase Admin credentials not configured on backend (Render) or token could not be verified."
+                }
+            }), 401
+
+    return decorated_function
+
+require_authenticated_user = require_user_auth
