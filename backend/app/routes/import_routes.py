@@ -97,7 +97,7 @@ def preview_import_file():
 
     try:
         df = _read_dataframe(file)
-        columns = [str(c).strip() for c in df.columns]
+        columns = [c.strip() for c in df.columns]
         total_rows = len(df)
 
         suggested_mapping = {col: _suggest_field(col) for col in columns}
@@ -149,7 +149,7 @@ def execute_import():
 
     # If mapping is empty, auto-detect
     if not mapping:
-        mapping = {str(col): _suggest_field(str(col)) for col in df.columns}
+        mapping = {col: _suggest_field(col) for col in df.columns}
 
     db = get_firestore_db()
     now_iso = datetime.now(timezone.utc).isoformat()

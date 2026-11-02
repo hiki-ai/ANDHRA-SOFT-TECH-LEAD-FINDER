@@ -12,7 +12,8 @@
   ],
   "extraPaths": [
     "backend",
-    "worker"
+    "worker",
+    "backend/.venv/Lib/site-packages"
   ],
   "venvPath": "backend",
   "venv": ".venv",

@@ -1,0 +1,29 @@
+# Pyrefly Configuration for AST Extractor
+
+python-interpreter = "backend/.venv/Scripts/python.exe"
+python-version = "3.13"
+python-platform = "win32"
+
+search-path = [
+    "backend",
+    "worker"
+]
+
+site-package-path = [
+    "backend/.venv/Lib/site-packages"
+]
+
+project-includes = [
+    "backend",
+    "worker",
+    "tests"
+]
+
+project-excludes = [
+    "**/__pycache__",
+    "**/node_modules",
+    "frontend/**"
+]
+
+use-ignore-files = true
+ignore-missing-source = true
