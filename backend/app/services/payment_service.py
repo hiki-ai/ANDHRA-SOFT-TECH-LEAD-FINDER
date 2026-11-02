@@ -251,7 +251,7 @@ class PaymentService:
         if not doc or not getattr(doc, 'exists', True) or not doc.to_dict():
             raise ValueError(f"Payment record for order '{order_id}' not found.")
 
-        payment_data = doc.to_dict()
+        payment_data = doc.to_dict() or {}
 
         # Idempotency check: if already successful, return existing payment
         if payment_data.get('status') == 'successful':

@@ -1,0 +1,25 @@
+{
+  "include": [
+    "backend/app",
+    "worker",
+    "tests"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "backend/.venv",
+    "frontend"
+  ],
+  "extraPaths": [
+    "backend",
+    "worker"
+  ],
+  "venvPath": "backend",
+  "venv": ".venv",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "error",
+  "reportUndefinedVariable": "error",
+  "reportOptionalMemberAccess": "none",
+  "reportOptionalSubscript": "none",
+  "reportAttributeAccessIssue": "none"
+}

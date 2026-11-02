@@ -42,7 +42,7 @@ def list_vendors():
     try:
         docs = col_ref.stream()
         for doc in docs:
-            data = doc.to_dict()
+            data = doc.to_dict() or {} or {}
             if not data:
                 continue
             data['id'] = doc.id
@@ -103,7 +103,7 @@ def search_vendors():
     results = []
     try:
         for doc in col_ref.stream():
-            data = doc.to_dict()
+            data = doc.to_dict() or {} or {}
             if not data:
                 continue
             data['id'] = doc.id
@@ -135,7 +135,7 @@ def get_vendor(vendor_id):
             "error": {"code": "NOT_FOUND", "message": f"Vendor '{vendor_id}' not found"}
         }), 404
 
-    data = doc.to_dict()
+    data = doc.to_dict() or {} or {}
     data['id'] = doc.id
     return jsonify({
         "success": True,
@@ -217,7 +217,7 @@ def update_vendor(vendor_id):
             "error": {"code": "NOT_FOUND", "message": f"Vendor '{vendor_id}' not found"}
         }), 404
 
-    current_data = existing.to_dict()
+    current_data = existing.to_dict() or {}
     current_data.update(payload)
     current_data['updated_at'] = datetime.now(timezone.utc).isoformat()
 

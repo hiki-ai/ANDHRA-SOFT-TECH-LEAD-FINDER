@@ -64,8 +64,8 @@ def checkout_subscription():
     Validates plan and billing cycle on backend. Never trusts frontend-supplied price!
     """
     user = getattr(request, 'current_user', {})
-    user_id = user.get('uid')
-    user_email = user.get('email')
+    user_id = str(user.get('uid') or '')
+    user_email = str(user.get('email') or '')
 
     if not user_id:
         return jsonify({"success": False, "error": {"code": "AUTH_REQUIRED", "message": "User not authenticated"}}), 401

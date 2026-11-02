@@ -93,7 +93,9 @@ def create_export():
             row = {}
             for col in active_columns:
                 k = col.get('key') or col.get('name')
-                label = col.get('label') or k
+                if not k:
+                    continue
+                label = str(col.get('label') or k)
                 val = data.get(k)
                 if val is None and k == 'source_id':
                     val = data.get('place_id')

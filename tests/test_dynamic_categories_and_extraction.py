@@ -123,6 +123,8 @@ class TestDynamicCategoriesAndExtraction(unittest.TestCase):
         """4. Critical requirement: Collection job persists ONLY configured fields, omitting unselected optional fields."""
         # Mock connector that yields a rich record containing ratings, reviews, address, website, etc.
         class MockConnector:
+            def get_source_id(self):
+                return "mock_source"
             def get_source_name(self):
                 return "Mock Source"
             def is_configured(self):

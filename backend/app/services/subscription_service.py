@@ -47,7 +47,7 @@ class SubscriptionService:
                             pass
 
                     # Attach plan details
-                    plan = PlanService.get_plan_by_id(data.get('plan_id'))
+                    plan = PlanService.get_plan_by_id(str(data.get('plan_id') or 'basic'))
                     if plan:
                         data['plan_details'] = plan
                         data['plan_name'] = plan.get('name')

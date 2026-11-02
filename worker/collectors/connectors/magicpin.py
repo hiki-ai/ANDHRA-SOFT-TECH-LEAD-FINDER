@@ -31,7 +31,7 @@ class MagicpinConnector(BaseCollector):
         if self._explicit_key:
             return self._explicit_key
         try:
-            from backend.app.config.settings import Settings
+            from app.config.settings import Settings
             key = Settings.get_magicpin_api_key()
             if key:
                 return key
@@ -72,6 +72,7 @@ class MagicpinConnector(BaseCollector):
         location: str,
         target_count: int,
         should_stop: Optional[Callable[[], bool]] = None,
+        selected_columns: Optional[list] = None,
         **kwargs
     ) -> Generator[Dict[str, Any], None, None]:
         if not self.is_configured():

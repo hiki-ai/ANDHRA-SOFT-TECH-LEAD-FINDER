@@ -71,7 +71,9 @@ class BaseCollector(ABC):
         category: str,
         location: str,
         target_count: int,
-        should_stop: Optional[Callable[[], bool]] = None
+        should_stop: Optional[Callable[[], bool]] = None,
+        selected_columns: Optional[list] = None,
+        **kwargs
     ) -> Generator[Dict[str, Any], None, None]:
         """
         Yields raw vendor records from permitted official APIs.
@@ -79,3 +81,10 @@ class BaseCollector(ABC):
         Must strictly adhere to rate limits and error handling.
         """
         pass
+
+    def fetch_photo_uri(self, photo_name: str) -> Optional[str]:
+        """
+        Optional helper to resolve a photo resource identifier to an image URI.
+        Default implementation returns None for collectors that do not support photos.
+        """
+        return None

@@ -8,6 +8,7 @@ Location: backend/app/routes/payment_routes.py
 """
 
 import json
+import time
 from flask import Blueprint, jsonify, request
 from ..middleware.firebase_auth import require_user_auth
 from ..services.payment_service import PaymentService
@@ -30,8 +31,8 @@ def get_payment_methods():
 @require_user_auth
 def create_payment_order():
     user = getattr(request, 'current_user', {})
-    user_id = user.get('uid')
-    user_email = user.get('email')
+    user_id = str(user.get('uid') or '')
+    user_email = str(user.get('email') or '')
 
     if not user_id:
         return jsonify({"success": False, "error": {"code": "AUTH_REQUIRED", "message": "User not authenticated"}}), 401

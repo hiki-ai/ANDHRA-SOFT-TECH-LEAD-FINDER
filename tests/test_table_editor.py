@@ -366,7 +366,7 @@ class TestTableEditorAndPresets(unittest.TestCase):
         # Download CSV
         res_dl = self.client.get(f"/api/v1/exports/{exp_data['export_id']}/download")
         self.assertEqual(res_dl.status_code, 200)
-        self.assertIn("text/csv", res_dl.headers.get('Content-Type'))
+        self.assertIn("text/csv", res_dl.headers.get('Content-Type', ''))
         print(f"[PASS] Test 11: Exported all {exp_data['row_count']} matching leads via streaming.")
 
     def test_12_authentication_and_authorization(self):

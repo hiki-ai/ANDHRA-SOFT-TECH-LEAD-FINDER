@@ -41,7 +41,7 @@ except ImportError:
     SOURCE_FIELD_CAPABILITIES = {}
     def check_source_capabilities(source_id, columns):
         return {"is_valid": True, "blocking_errors": [], "warnings": []}
-    def get_field_capability_info(source_id, key):
+    def get_field_capability_info(source_id: str, field_key: str):
         return {"supported": True, "availability": "full"}
 
 
@@ -251,7 +251,7 @@ def update_preset(preset_id):
             "error": {"code": "NOT_FOUND", "message": f"Preset '{preset_id}' not found."}
         }), 404
 
-    existing_data = doc.to_dict()
+    existing_data = doc.to_dict() or {} or {}
     payload = request.get_json() or {}
 
     # Check for name conflict if renaming

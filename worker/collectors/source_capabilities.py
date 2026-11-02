@@ -267,8 +267,11 @@ def check_source_capabilities(
         if not is_enabled:
             continue
 
-        key = col.get("key") or col.get("name")
-        label = col.get("label") or key
+        raw_key = col.get("key") or col.get("name")
+        if not raw_key:
+            continue
+        key = str(raw_key)
+        label = str(col.get("label") or key)
         is_required = bool(col.get("is_required", False))
 
         cap = get_field_capability_info(source_clean, key)

@@ -92,7 +92,7 @@ def update_column(column_id):
             "error": {"code": "NOT_FOUND", "message": f"Column '{column_id}' not found"}
         }), 404
 
-    data = doc.to_dict()
+    data = doc.to_dict() or {}
     data.update(payload)
     data['updated_at'] = datetime.now(timezone.utc).isoformat()
 

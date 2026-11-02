@@ -145,7 +145,8 @@ class CollectionWorker:
             selected_keys = {"business_name", "category", "phone", "address", "website"}
 
         search_options = {"should_stop": should_stop, "selected_columns": preset_columns}
-        if connector.get_source_id() == "google_places":
+        source_id = connector.get_source_id() if hasattr(connector, "get_source_id") else ""
+        if source_id == "google_places":
             provider_column_keys = {
                 "business_name", "category", "phone", "address", "city", "state",
                 "website", "rating", "review_count", "place_id", "source_id",
@@ -170,7 +171,7 @@ class CollectionWorker:
                 found_count += 1
                 mapped_record = raw_record
                 image_fields = (*GooglePlacesPhotoMapper.IMAGE_FIELDS, "image_count")
-                if connector.get_source_id() == "google_places" and selected_keys.intersection(image_fields):
+                if source_id == "google_places" and selected_keys.intersection(image_fields):
                     mapped_record = GooglePlacesPhotoMapper.map_record(raw_record, connector.fetch_photo_uri)
 
                 normalized = RecordNormalizer.normalize(mapped_record)
@@ -195,7 +196,15 @@ class CollectionWorker:
                     existing_keys.add(dedupe_key)
                     if user_id:
                         try:
-                            from app.services.trial_service import TrialService
+                            try:
+                                from app.services.trial_service import TrialService
+                            except ImportError:
+                                import sys, os
+                                backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'backend'))
+                                if backend_path not in sys.path:
+                                    sys.path.insert(0, backend_path)
+                                from app.services.trial_service import TrialService
+
                             trial = TrialService.get_user_trial(user_id)
                             if trial and trial.get('trial_status') == 'active':
                                 TrialService.record_trial_unique_records(user_id, [dedupe_key])
@@ -203,7 +212,7 @@ class CollectionWorker:
                                 if t_current and t_current.get('trial_remaining', 0) <= 0:
                                     trial_limit_reached = True
                         except Exception as t_err:
-                            pass
+                            print(f"[CollectionWorker] Trial accounting notice: {t_err}")
 
                 doc_id = f"ven_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
 

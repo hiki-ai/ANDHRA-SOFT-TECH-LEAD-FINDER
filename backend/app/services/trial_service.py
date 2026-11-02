@@ -25,7 +25,7 @@ class TrialService:
         try:
             doc = db.collection('admin_settings').document('trial_config').get()
             if doc and getattr(doc, 'exists', True) and doc.to_dict():
-                return doc.to_dict()
+                return doc.to_dict() or dict(DEFAULT_TRIAL_SETTINGS)
         except Exception as e:
             print(f"[TrialService] Get settings notice: {e}")
 
@@ -129,7 +129,7 @@ class TrialService:
         from .subscription_service import SubscriptionService
         sub = SubscriptionService.get_current_subscription(user_id)
         if sub and sub.get('status') == 'active':
-            plan_id = sub.get('plan_id')
+            plan_id = str(sub.get('plan_id') or 'basic')
             from .plan_service import PlanService
             plan = PlanService.get_plan_by_id(plan_id)
             plan_limits = plan.get('limits', {}) if plan else {}
