@@ -121,12 +121,27 @@ export function AdminPlans() {
     e.preventDefault();
     setSaving(true);
     try {
+      const planId = formData.plan_id.trim().toLowerCase();
+      if (!planId) {
+        toast.error('Plan identifier is required.');
+        setSaving(false);
+        return;
+      }
+
+      if (!editingPlan && plans.some((p) => (p.plan_id || '').toLowerCase() === planId)) {
+        toast.error(`A plan with identifier '${planId}' already exists. Please choose a unique identifier.`);
+        setSaving(false);
+        return;
+      }
+
       const payload = {
-        plan_id: formData.plan_id.trim().toLowerCase(),
+        plan_id: planId,
         name: formData.name.trim(),
         description: formData.description.trim(),
         monthly_price_paise: Math.round(Number(formData.monthly_price_inr) * 100),
+        monthly_price_inr: Number(formData.monthly_price_inr),
         yearly_price_paise: Math.round(Number(formData.yearly_price_inr) * 100),
+        yearly_price_inr: Number(formData.yearly_price_inr),
         discount_label: formData.discount_label.trim(),
         features: formData.features_text
           .split('\n')

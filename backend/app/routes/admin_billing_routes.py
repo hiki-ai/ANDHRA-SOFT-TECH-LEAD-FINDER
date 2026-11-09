@@ -33,7 +33,7 @@ def create_admin_plan():
     user = getattr(request, 'current_user', {})
     payload = request.get_json() or {}
     try:
-        saved = PlanService.save_plan(payload)
+        saved = PlanService.save_plan(payload, check_duplicate=True)
         AuditService.log_action(
             admin_uid=user.get('uid', 'admin'),
             admin_email=user.get('email', 'admin@andhrasofttech.com'),
@@ -44,7 +44,15 @@ def create_admin_plan():
         )
         return jsonify({"success": True, "data": saved, "message": "Plan created successfully"}), 201
     except ValueError as ve:
-        return jsonify({"success": False, "error": {"code": "VALIDATION_ERROR", "message": str(ve)}}), 400
+        err_msg = str(ve)
+        status_code = 409 if "already exists" in err_msg.lower() else 400
+        return jsonify({
+            "success": False,
+            "error": {
+                "code": "DUPLICATE_PLAN" if status_code == 409 else "VALIDATION_ERROR",
+                "message": err_msg
+            }
+        }), status_code
     except Exception as e:
         return jsonify({"success": False, "error": {"code": "SERVER_ERROR", "message": str(e)}}), 500
 

@@ -17,7 +17,7 @@ public_bp = Blueprint('public', __name__, url_prefix='/api/public')
 @plan_bp.route('', methods=['GET'])
 def get_public_plans():
     """
-    Returns the three active premium plans dynamically from Cloud Firestore.
+    Returns all active premium plans dynamically from Cloud Firestore.
     Monetary amounts are provided in both integer paise and INR.
     """
     plans = PlanService.get_active_plans()
@@ -25,10 +25,18 @@ def get_public_plans():
     for p in plans:
         m_paise = int(p.get('monthly_price_paise', 0))
         y_paise = int(p.get('yearly_price_paise', 0))
+        if not m_paise and p.get('monthly_price_inr'):
+            m_paise = int(round(float(p.get('monthly_price_inr')) * 100))
+        if not y_paise and p.get('yearly_price_inr'):
+            y_paise = int(round(float(p.get('yearly_price_inr')) * 100))
+
+        name = p.get('name') or p.get('display_name') or p.get('plan_id', '')
         formatted.append({
-            "plan_id": p.get('plan_id'),
-            "name": p.get('name'),
-            "description": p.get('description'),
+            "plan_id": p.get('plan_id') or p.get('id'),
+            "id": p.get('plan_id') or p.get('id'),
+            "name": name,
+            "display_name": name,
+            "description": p.get('description', ''),
             "monthly_price_paise": m_paise,
             "monthly_price_inr": round(m_paise / 100, 2),
             "yearly_price_paise": y_paise,
@@ -38,7 +46,7 @@ def get_public_plans():
             "limits": p.get('limits', {}),
             "is_active": p.get('is_active', True),
             "is_popular": p.get('is_popular', False),
-            "display_order": p.get('display_order', 1),
+            "display_order": p.get('display_order', 99),
             "cta_text": p.get('cta_text', 'Choose Plan')
         })
 

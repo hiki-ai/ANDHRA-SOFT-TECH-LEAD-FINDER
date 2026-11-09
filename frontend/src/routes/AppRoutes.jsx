@@ -74,6 +74,7 @@ export function AppRoutes() {
         {/* 1. Public Landing & Pricing Page (PART 2) */}
         <Route element={<PublicLayout />}>
           <Route path="/" element={<Home />} />
+          <Route path="/pricing" element={<Home />} />
         </Route>
 
         {/* 2. Authentication */}

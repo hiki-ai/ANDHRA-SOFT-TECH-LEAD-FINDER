@@ -35,29 +35,31 @@ export function Home() {
   const [plans, setPlans] = useState([]);
   const [publicSettings, setPublicSettings] = useState(null);
   const [loadingPlans, setLoadingPlans] = useState(true);
+  const [plansError, setPlansError] = useState(null);
   const [startingTrial, setStartingTrial] = useState(false);
 
   // Fetch plans dynamically from Cloud Firestore via backend API
-  useEffect(() => {
-    let isMounted = true;
-    async function loadData() {
-      try {
-        const [plansData, settingsData] = await Promise.all([
-          billingService.getPublicPlans(),
-          billingService.getPublicSettings().catch(() => ({})),
-        ]);
-        if (isMounted) {
-          setPlans(plansData);
-          setPublicSettings(settingsData);
-        }
-      } catch (err) {
-        console.warn('[Home] Failed to load plans dynamically:', err);
-      } finally {
-        if (isMounted) setLoadingPlans(false);
-      }
+  const fetchPlans = async () => {
+    setLoadingPlans(true);
+    setPlansError(null);
+    try {
+      const [plansData, settingsData] = await Promise.all([
+        billingService.getPublicPlans(),
+        billingService.getPublicSettings().catch(() => ({})),
+      ]);
+      const validPlans = Array.isArray(plansData) ? plansData.filter((p) => p && p.is_active !== false) : [];
+      setPlans(validPlans);
+      setPublicSettings(settingsData);
+    } catch (err) {
+      console.error('[Home] Failed to load plans dynamically:', err);
+      setPlansError(err.message || 'Unable to load pricing plans right now. Please try again.');
+    } finally {
+      setLoadingPlans(false);
     }
-    loadData();
-    return () => { isMounted = false; };
+  };
+
+  useEffect(() => {
+    fetchPlans();
   }, []);
 
   const handleChoosePlan = (plan) => {
@@ -276,17 +278,47 @@ export function Home() {
           <div className="py-16 flex items-center justify-center">
             <Loader size="lg" text="Loading real-time plans from database..." />
           </div>
+        ) : plansError ? (
+          <div className="py-12 max-w-md mx-auto text-center p-6 rounded-3xl bg-rose-50 border border-rose-200 shadow-xs">
+            <p className="text-xs font-semibold text-rose-700 mb-4">{plansError}</p>
+            <Button size="sm" variant="outline" onClick={fetchPlans}>
+              Retry Loading Plans
+            </Button>
+          </div>
+        ) : plans.length === 0 ? (
+          <div className="py-16 text-center max-w-md mx-auto p-8 rounded-3xl bg-white border border-surface-200 shadow-xs">
+            <div className="w-12 h-12 rounded-2xl bg-surface-100 flex items-center justify-center mx-auto mb-3 text-surface-400">
+              <Layers className="w-6 h-6" />
+            </div>
+            <p className="text-sm font-bold text-surface-800">No active plans currently available</p>
+            <p className="text-xs text-surface-500 mt-1">
+              Please check back shortly or contact our team for custom enterprise onboarding.
+            </p>
+          </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-stretch">
+          <div
+            className={`grid grid-cols-1 ${
+              plans.length === 1
+                ? 'max-w-md mx-auto'
+                : plans.length === 2
+                ? 'md:grid-cols-2 max-w-4xl mx-auto'
+                : plans.length === 4
+                ? 'md:grid-cols-2 lg:grid-cols-4 max-w-7xl'
+                : 'md:grid-cols-2 lg:grid-cols-3'
+            } gap-8 items-stretch`}
+          >
             {plans.map((plan) => {
               const isYearly = billingCycle === 'yearly';
-              const priceInr = isYearly ? plan.yearly_price_inr : plan.monthly_price_inr;
+              const priceInr = isYearly
+                ? (plan.yearly_price_inr ?? Math.round((plan.yearly_price_paise || 0) / 100))
+                : (plan.monthly_price_inr ?? Math.round((plan.monthly_price_paise || 0) / 100));
               const periodText = isYearly ? '/year' : '/month';
               const isPopular = plan.is_popular;
+              const planKey = plan.plan_id || plan.id;
 
               return (
                 <div
-                  key={plan.plan_id}
+                  key={planKey}
                   className={`relative rounded-3xl p-8 flex flex-col justify-between transition-all duration-200 bg-white border ${
                     isPopular
                       ? 'border-brand-500 ring-2 ring-brand-500/20 shadow-xl lg:-translate-y-2'
@@ -304,7 +336,7 @@ export function Home() {
                     {/* Header */}
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-xl font-bold text-surface-900">
-                        {plan.name}
+                        {plan.name || plan.display_name || plan.plan_id}
                       </h3>
                       {isYearly && (
                         <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
@@ -321,7 +353,7 @@ export function Home() {
                     <div className="mb-6 pb-6 border-b border-surface-100">
                       <div className="flex items-baseline gap-1">
                         <span className="text-4xl font-black text-surface-900 tracking-tight">
-                          ₹{priceInr.toLocaleString('en-IN')}
+                          ₹{Number(priceInr || 0).toLocaleString('en-IN')}
                         </span>
                         <span className="text-xs font-semibold text-surface-500">
                           {periodText}
@@ -357,7 +389,7 @@ export function Home() {
                       iconRight={ArrowRight}
                       onClick={() => handleChoosePlan(plan)}
                     >
-                      {plan.cta_text || 'Choose Plan'}
+                      {plan.cta_text || `Subscribe to ${plan.name || 'Plan'}`}
                     </Button>
                     <p className="text-[10px] text-center text-surface-400 mt-2.5">
                       Secure checkout powered by Razorpay (UPI, Cards & EMI)
