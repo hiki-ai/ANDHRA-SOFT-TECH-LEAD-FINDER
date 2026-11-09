@@ -152,6 +152,15 @@ def execute_import():
         mapping = {col: _suggest_field(col) for col in df.columns}
 
     db = get_firestore_db()
+    if db is None:
+        return jsonify({
+            "success": False,
+            "error": {
+                "code": "DATABASE_UNAVAILABLE",
+                "message": "Cloud Firestore database service is unavailable."
+            }
+        }), 503
+
     now_iso = datetime.now(timezone.utc).isoformat()
 
     # Load existing dedupe keys to detect duplicates
@@ -175,7 +184,14 @@ def execute_import():
         custom_fields = {}
 
         for excel_col, target_field in mapping.items():
-            val = str(row.get(excel_col, '')).strip()
+            if excel_col in row:
+                raw_val = row[excel_col]
+                if isinstance(raw_val, pd.Series):
+                    raw_val = raw_val.iloc[0]
+                val = str(raw_val).strip() if pd.notna(raw_val) else ''
+            else:
+                val = ''
+
             if target_field == '__ignore__' or not val:
                 continue
             if target_field.startswith('custom_') or target_field == '__custom__':
@@ -188,8 +204,8 @@ def execute_import():
             failed_count += 1
             continue
 
-        phone = str(record.get('phone', '')).strip()
-        city = str(record.get('city', '')).strip() or 'Andhra Pradesh'
+        phone = record.get('phone', '').strip()
+        city = record.get('city', '').strip() or 'Andhra Pradesh'
         dedupe_key = DuplicateService.generate_dedupe_key(b_name, phone, city)
 
         if dedupe_key in existing_dedupe_keys:
@@ -241,10 +257,14 @@ def execute_import():
     # Chunked batch commit (<= 450 documents/commit respecting Firestore 500-limit)
     try:
         col_ref = db.collection('vendors')
+        if col_ref is None:
+            raise RuntimeError("Database collection 'vendors' reference could not be created.")
         chunk_size = 450
         for i in range(0, len(records_to_commit), chunk_size):
             chunk = records_to_commit[i:i + chunk_size]
             batch = db.batch()
+            if batch is None:
+                raise RuntimeError("Database batch could not be created.")
             for rec in chunk:
                 batch.set(col_ref.document(rec['id']), rec)
             batch.commit()
