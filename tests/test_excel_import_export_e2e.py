@@ -21,16 +21,17 @@ import json
 import os
 import sys
 import unittest
-import pandas as pd
-import openpyxl
 
-# Add backend and worker to sys.path
+# Add backend and worker to sys.path first
 backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend'))
 worker_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'worker'))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 if worker_dir not in sys.path:
     sys.path.append(worker_dir)
+
+import pandas as pd
+import openpyxl
 
 from app import create_app
 from app.config.firebase import get_firestore_db
@@ -151,15 +152,18 @@ class TestExcelImportExportE2E(unittest.TestCase):
 
         # Verify collection exists in Firestore collections
         db = get_firestore_db()
+        self.assertIsNotNone(db, "Cloud Firestore database client is not initialized")
+        assert db is not None
         col_doc = db.collection('collections').document(col_id).get()
         self.assertTrue(col_doc.exists, f"Collection document {col_id} not found in Firestore!")
-        cdata = col_doc.to_dict()
+        cdata = col_doc.to_dict() or {}
         self.assertEqual(cdata.get('category'), 'AP Agri Exporters 2026')
         self.assertEqual(cdata.get('source'), 'excel_import')
         self.assertEqual(cdata.get('status'), 'completed')
         self.assertEqual(cdata.get('found'), 3)
         self.assertEqual(cdata.get('valid'), 3)
-        preset_labels = [p.get('label') for p in cdata.get('preset_columns', [])]
+        preset_cols = cdata.get('preset_columns', [])
+        preset_labels = [p.get('label') for p in preset_cols if isinstance(p, dict)]
         self.assertIn('Industry', preset_labels)
         self.assertIn('Custom Rank', preset_labels)
 
@@ -228,7 +232,9 @@ class TestExcelImportExportE2E(unittest.TestCase):
 
         # Verify it's a real valid openpyxl workbook
         wb = openpyxl.load_workbook(io.BytesIO(res_dl.data))
+        self.assertIsNotNone(wb.active, "Workbook has no active worksheet")
         sheet = wb.active
+        assert sheet is not None
         headers = [cell.value for cell in sheet[1]]
         self.assertIn('Business Name', headers)
         self.assertIn('Phone', headers)

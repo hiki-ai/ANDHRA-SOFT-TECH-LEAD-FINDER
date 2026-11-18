@@ -25,10 +25,18 @@ def get_public_plans():
     for p in plans:
         m_paise = int(p.get('monthly_price_paise', 0))
         y_paise = int(p.get('yearly_price_paise', 0))
-        if not m_paise and p.get('monthly_price_inr'):
-            m_paise = int(round(float(p.get('monthly_price_inr')) * 100))
-        if not y_paise and p.get('yearly_price_inr'):
-            y_paise = int(round(float(p.get('yearly_price_inr')) * 100))
+        m_inr = p.get('monthly_price_inr')
+        if not m_paise and m_inr is not None:
+            try:
+                m_paise = int(round(float(m_inr) * 100))
+            except (ValueError, TypeError):
+                m_paise = 0
+        y_inr = p.get('yearly_price_inr')
+        if not y_paise and y_inr is not None:
+            try:
+                y_paise = int(round(float(y_inr) * 100))
+            except (ValueError, TypeError):
+                y_paise = 0
 
         name = p.get('name') or p.get('display_name') or p.get('plan_id', '')
         formatted.append({

@@ -191,6 +191,13 @@ def execute_import():
         }), 400
 
     file = request.files['file']
+    if not file or not file.filename:
+        return jsonify({
+            "success": False,
+            "error": {"code": "FILE_REQUIRED", "message": "Spreadsheet file required"}
+        }), 400
+
+    filename: str = file.filename
     user = getattr(request, 'current_user', {})
     user_id = user.get('uid')
 
@@ -203,8 +210,8 @@ def execute_import():
             mapping = {}
 
     collection_name = (request.form.get('collection_name') or '').strip()
-    skip_duplicates_raw = request.form.get('skip_duplicates', 'true')
-    skip_duplicates = str(skip_duplicates_raw).lower() in ('true', '1', 'yes')
+    skip_duplicates_raw = request.form.get('skip_duplicates') or 'true'
+    skip_duplicates = skip_duplicates_raw.strip().lower() in ('true', '1', 'yes')
 
     try:
         df = _read_dataframe(file)
@@ -226,7 +233,7 @@ def execute_import():
 
     # Generate collection identity
     if not collection_name:
-        base_name = file.filename.rsplit('.', 1)[0] if '.' in file.filename else file.filename
+        base_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
         collection_name = f"Imported - {base_name}"
 
     col_id = f"col_{int(time.time() * 1000)}_{uuid.uuid4().hex[:4]}"
@@ -354,7 +361,7 @@ def execute_import():
             "pincode": record.get('pincode', ''),
             "rating": float(record.get('rating', 0.0) or 0.0),
             "review_count": int(record.get('review_count', 0) or 0),
-            "source": f"Spreadsheet Import ({file.filename})",
+            "source": f"Spreadsheet Import ({filename})",
             "status": "valid",
             "data_quality_score": quality_score,
             "dedupe_key": dedupe_key,
@@ -397,12 +404,12 @@ def execute_import():
         "id": col_id,
         "name": collection_name,
         "category": collection_name,
-        "location": f"Imported ({file.filename})",
+        "location": f"Imported ({filename})",
         "target_count": len(df),
         "source": "excel_import",
-        "source_name": f"Excel Import ({file.filename})",
-        "current_source": f"Excel Import ({file.filename})",
-        "filename": file.filename,
+        "source_name": f"Excel Import ({filename})",
+        "current_source": f"Excel Import ({filename})",
+        "filename": filename,
         "type": "import",
         "user_id": user_id,
         "preset_id": "preset_imported",
@@ -434,7 +441,7 @@ def execute_import():
         "data": {
             "collection_id": col_id,
             "collection_name": collection_name,
-            "filename": file.filename,
+            "filename": filename,
             "total_rows": len(df),
             "inserted": inserted_count,
             "duplicate": duplicate_count,

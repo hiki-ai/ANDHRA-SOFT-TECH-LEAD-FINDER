@@ -100,12 +100,13 @@ class PlanService:
 
         try:
             doc = db.collection('plans').document(plan_id).get()
-            if doc and getattr(doc, 'exists', True) and doc.to_dict():
+            if doc and getattr(doc, 'exists', True):
                 d = doc.to_dict()
-                d['id'] = doc.id
-                if 'plan_id' not in d:
-                    d['plan_id'] = doc.id
-                return d
+                if d is not None:
+                    d['id'] = doc.id
+                    if 'plan_id' not in d:
+                        d['plan_id'] = doc.id
+                    return d
         except Exception as e:
             print(f"[PlanService] Get plan error: {e}")
 
@@ -131,10 +132,18 @@ class PlanService:
 
         monthly_price_paise = int(plan_data.get('monthly_price_paise', 0))
         yearly_price_paise = int(plan_data.get('yearly_price_paise', 0))
-        if not monthly_price_paise and plan_data.get('monthly_price_inr'):
-            monthly_price_paise = int(round(float(plan_data.get('monthly_price_inr')) * 100))
-        if not yearly_price_paise and plan_data.get('yearly_price_inr'):
-            yearly_price_paise = int(round(float(plan_data.get('yearly_price_inr')) * 100))
+        m_inr = plan_data.get('monthly_price_inr')
+        if not monthly_price_paise and m_inr is not None:
+            try:
+                monthly_price_paise = int(round(float(m_inr) * 100))
+            except (ValueError, TypeError):
+                monthly_price_paise = 0
+        y_inr = plan_data.get('yearly_price_inr')
+        if not yearly_price_paise and y_inr is not None:
+            try:
+                yearly_price_paise = int(round(float(y_inr) * 100))
+            except (ValueError, TypeError):
+                yearly_price_paise = 0
 
         name = str(plan_data.get('name') or plan_data.get('display_name') or plan_id.capitalize()).strip()
 
