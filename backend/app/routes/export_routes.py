@@ -160,11 +160,9 @@ def create_export():
             if extra_header and extra_header not in ordered_headers:
                 ordered_headers.append(extra_header)
 
-    df = pd.DataFrame(data=rows, columns=ordered_headers)
-    for col_name in ordered_headers:
-        if col_name not in df.columns:
-            df[col_name] = ""
-    df = df[ordered_headers]
+    df = pd.DataFrame(rows)
+    if ordered_headers:
+        df = df.reindex(columns=ordered_headers, fill_value="")
 
     export_id = f"exp_{int(time.time() * 1000)}"
 
