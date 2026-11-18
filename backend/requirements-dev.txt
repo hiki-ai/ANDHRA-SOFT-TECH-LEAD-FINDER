@@ -1,3 +1,4 @@
 # Development and Type Checking Dependencies
 types-openpyxl>=3.1.5
 pytest>=8.0.0
+
