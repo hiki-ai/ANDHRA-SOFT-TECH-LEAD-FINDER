@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Layers,
   PlayCircle,
@@ -15,6 +15,8 @@ import {
   AlertCircle,
   PauseCircle,
   ExternalLink,
+  Upload,
+  ChevronRight,
 } from 'lucide-react';
 import { collectionService } from '@/services/collectionService';
 import { exportService } from '@/services/exportService';
@@ -27,11 +29,13 @@ export function UserCollections() {
   const [loading, setLoading] = useState(true);
   const [exportingId, setExportingId] = useState(null);
   const toast = useToast();
+  const navigate = useNavigate();
 
   const loadData = async () => {
     try {
-      const data = await collectionService.listCollections();
-      setCollections(data);
+      const res = await collectionService.getCollections();
+      const data = res?.data || res;
+      setCollections(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('[UserCollections] Fetch error:', err);
     } finally {
@@ -48,18 +52,14 @@ export function UserCollections() {
   const handleDownloadExcel = async (col) => {
     setExportingId(col.id);
     try {
-      toast.info('Generating formatted Excel (.xlsx) file...');
-      const res = await exportService.createExport({
+      toast.info(`Generating Excel export for "${col.name || col.category || 'leads'}"...`);
+      await exportService.downloadDirectly({
         collection_id: col.id,
         format: 'xlsx',
       });
-      if (res?.export_id) {
-        exportService.downloadExport(res.export_id);
-        toast.success('Excel download started.');
-      } else {
-        toast.error('Export failed to generate.');
-      }
+      toast.success('Excel spreadsheet downloaded.');
     } catch (err) {
+      console.error('[UserCollections] Export error:', err);
       toast.error(err.message || 'Excel export failed.');
     } finally {
       setExportingId(null);
@@ -86,11 +86,18 @@ export function UserCollections() {
           </p>
         </div>
 
-        <Link to="/app/start-collection">
-          <Button size="sm" variant="primary" iconLeft={PlayCircle}>
-            Start New Collection
-          </Button>
-        </Link>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Link to="/import">
+            <Button size="sm" variant="outline" iconLeft={Upload}>
+              Import Excel Leads
+            </Button>
+          </Link>
+          <Link to="/app/start-collection">
+            <Button size="sm" variant="primary" iconLeft={PlayCircle}>
+              Start New Collection
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {collections.length === 0 ? (
@@ -102,13 +109,20 @@ export function UserCollections() {
             No Collections Yet
           </h3>
           <p className="text-xs text-surface-500 mt-1 mb-6">
-            You haven't run any lead extractions yet. Launch your first extraction job now.
+            You haven't run any lead extractions or spreadsheet imports yet. Get started now.
           </p>
-          <Link to="/app/start-collection">
-            <Button size="md" variant="primary" iconLeft={PlayCircle}>
-              Start Collection
-            </Button>
-          </Link>
+          <div className="flex items-center justify-center gap-3">
+            <Link to="/import">
+              <Button size="md" variant="outline" iconLeft={Upload}>
+                Import Excel Leads
+              </Button>
+            </Link>
+            <Link to="/app/start-collection">
+              <Button size="md" variant="primary" iconLeft={PlayCircle}>
+                Start Collection
+              </Button>
+            </Link>
+          </div>
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-surface-200 overflow-hidden shadow-xs">
@@ -133,13 +147,22 @@ export function UserCollections() {
                   const isFailed = status === 'failed';
 
                   return (
-                    <tr key={col.id} className="hover:bg-surface-50/50 transition-colors">
+                    <tr
+                      key={col.id}
+                      onClick={() => navigate(`/collections/${col.id}`)}
+                      className="hover:bg-surface-50/50 transition-colors cursor-pointer group"
+                    >
                       <td className="px-6 py-4">
-                        <div className="font-bold text-surface-900">
-                          {col.category} in {col.location}
+                        <div className="font-bold text-surface-900 group-hover:text-brand-600 transition-colors">
+                          {col.category || col.name} {col.location ? `in ${col.location}` : ''}
                         </div>
-                        <div className="text-[10px] text-surface-400 font-mono mt-0.5">
-                          {col.id}
+                        <div className="text-[10px] text-surface-400 font-mono mt-0.5 flex items-center gap-1.5">
+                          <span>{col.id}</span>
+                          {col.source === 'excel_import' && (
+                            <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">
+                              IMPORT
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-6 py-4 text-surface-600">

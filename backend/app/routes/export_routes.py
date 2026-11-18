@@ -39,11 +39,13 @@ def create_export():
 
     # Determine column schema configuration from collection snapshot or preset
     active_columns = None
+    collection_name = None
 
     if collection_id:
         c_doc = db.collection('collections').document(collection_id).get()
         if c_doc and getattr(c_doc, 'exists', True) and c_doc.to_dict():
             c_data = c_doc.to_dict()
+            collection_name = c_data.get('name') or c_data.get('category')
             if c_data.get('preset_columns') and isinstance(c_data['preset_columns'], list):
                 active_columns = [c for c in c_data['preset_columns'] if c.get('is_enabled', True)]
             elif c_data.get('preset_id'):
@@ -63,10 +65,11 @@ def create_export():
     # If no preset resolved, use standard default columns
     if not active_columns:
         from ..models.table_preset import DEFAULT_COLUMNS
-        active_columns = DEFAULT_COLUMNS
+        active_columns = [dict(c) for c in DEFAULT_COLUMNS]
 
     col_ref = db.collection('vendors')
     rows = []
+    discovered_custom_keys = set()
 
     try:
         for doc in col_ref.stream():
@@ -89,6 +92,12 @@ def create_export():
                 if q not in name and q not in ph and q not in c:
                     continue
 
+            # Check for extra custom fields not in active_columns
+            if 'custom_fields' in data and isinstance(data['custom_fields'], dict):
+                for cf_k in data['custom_fields'].keys():
+                    if not any((c.get('key') == cf_k or c.get('name') == cf_k or c.get('label') == cf_k) for c in active_columns):
+                        discovered_custom_keys.add(cf_k)
+
             # Map fields according to configured preset column order & labels
             row = {}
             for col in active_columns:
@@ -102,15 +111,26 @@ def create_export():
                 elif val is None and k == 'place_id':
                     val = data.get('source_id')
                 if val is None and 'custom_fields' in data and isinstance(data['custom_fields'], dict):
-                    val = data['custom_fields'].get(k)
+                    val = data['custom_fields'].get(k) or data['custom_fields'].get(label)
+                if val is None:
+                    val = data.get(label)
                 row[label] = "" if val is None else val
+
+            # Also populate any discovered custom keys
+            if 'custom_fields' in data and isinstance(data['custom_fields'], dict):
+                for cf_k, cf_v in data['custom_fields'].items():
+                    if cf_k not in row:
+                        row[cf_k] = "" if cf_v is None else cf_v
 
             rows.append(row)
     except Exception as e:
         print(f"[ExportRoutes] Query error: {e}")
 
-    # Guaranteed ordered headers matching exact configured preset columns
+    # Guaranteed ordered headers matching exact configured columns + discovered custom columns
     ordered_headers = [col.get('label') or col.get('key') for col in active_columns]
+    for extra_k in sorted(discovered_custom_keys):
+        if extra_k not in ordered_headers:
+            ordered_headers.append(extra_k)
 
     if rows:
         df = pd.DataFrame(rows)
@@ -125,17 +145,23 @@ def create_export():
 
     export_id = f"exp_{int(time.time() * 1000)}"
 
+    # Generate meaningful filename (e.g. AST_Imported_Leads_2026-11-18.xlsx or AST_Furniture_Leads_2026-11-18.xlsx)
+    raw_title = collection_name or category or 'Leads'
+    import re
+    clean_title = re.sub(r'[^a-zA-Z0-9_-]', '_', raw_title).strip('_')
+    date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+
     stream = io.BytesIO()
     if export_format == 'csv':
         df.to_csv(stream, index=False, encoding='utf-8')
         mimetype = 'text/csv'
-        filename = f"andhra_soft_tech_leads_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
+        filename = f"AST_{clean_title}_{date_str}.csv"
     else:
         with pd.ExcelWriter(stream, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Vendors')
+            df.to_excel(writer, index=False, sheet_name='Leads')
             # Auto-adjust column widths for premium XLSX aesthetic
             try:
-                ws = writer.sheets['Vendors']
+                ws = writer.sheets['Leads']
                 for col in ws.columns:
                     max_len = max(len(str(cell.value or '')) for cell in col)
                     col_letter = col[0].column_letter
@@ -144,7 +170,7 @@ def create_export():
                 pass
 
         mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        filename = f"andhra_soft_tech_leads_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.xlsx"
+        filename = f"AST_{clean_title}_{date_str}.xlsx"
 
     stream.seek(0)
     file_bytes = stream.getvalue()

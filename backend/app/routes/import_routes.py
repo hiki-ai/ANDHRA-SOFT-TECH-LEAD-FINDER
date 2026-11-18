@@ -5,13 +5,15 @@ REAL EXCEL / CSV IMPORT SERVICE USING PANDAS & OPENPYXL
 ==============================================================================
 Location: backend/app/routes/import_routes.py
 
-Handles real spreadsheet uploads, schema detection, row previews, validation,
-deduplication matching, and chunked batch commits to Cloud Firestore.
+Handles spreadsheet uploads, schema detection, row previews, validation,
+deduplication matching, collection creation, and chunked batch commits to Cloud Firestore.
 ==============================================================================
 """
 
 import io
 import json
+import os
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -31,27 +33,33 @@ def _suggest_field(col_name: str) -> str:
     c = col_name.strip().lower().replace('_', ' ').replace('-', ' ')
     if any(k in c for k in ['company', 'business', 'vendor name', 'shop name', 'firm', 'organization', 'name']):
         return 'business_name'
-    if any(k in c for k in ['mobile', 'phone', 'telephone', 'contact number', 'cell']):
-        return 'phone'
-    if any(k in c for k in ['alt phone', 'alternate', 'secondary phone']):
+    if any(k in c for k in ['alt phone', 'alternate', 'secondary phone', 'other phone']):
         return 'alternate_phone'
-    if any(k in c for k in ['email', 'mail']):
+    if any(k in c for k in ['mobile', 'phone', 'telephone', 'contact number', 'cell', 'contact']):
+        return 'phone'
+    if any(k in c for k in ['email', 'mail', 'e-mail']):
         return 'email'
-    if any(k in c for k in ['city', 'town', 'district']):
+    if any(k in c for k in ['website', 'web', 'url', 'site', 'link', 'homepage']):
+        return 'website'
+    if any(k in c for k in ['linkedin', 'linkedin url', 'profile']):
+        return 'linkedin'
+    if any(k in c for k in ['city', 'town', 'village', 'district']):
         return 'city'
     if any(k in c for k in ['state', 'province']):
         return 'state'
-    if any(k in c for k in ['pincode', 'pin code', 'zip', 'postal']):
+    if any(k in c for k in ['pincode', 'pin code', 'zip', 'postal', 'zipcode']):
         return 'pincode'
-    if any(k in c for k in ['category', 'industry', 'type', 'sector']):
+    if any(k in c for k in ['subcategory', 'sub-category', 'sub category']):
+        return 'subcategory'
+    if any(k in c for k in ['category', 'industry', 'type', 'sector', 'trade']):
         return 'category'
-    if any(k in c for k in ['website', 'web', 'url']):
-        return 'website'
-    if any(k in c for k in ['address', 'street', 'location']):
+    if any(k in c for k in ['address', 'street', 'location', 'place']):
         return 'address'
-    if any(k in c for k in ['rating', 'score']):
+    if any(k in c for k in ['rating', 'score', 'stars']):
         return 'rating'
-    return '__ignore__'
+    if any(k in c for k in ['review_count', 'reviews', 'review']):
+        return 'review_count'
+    return '__custom__'
 
 def _read_dataframe(file_storage) -> pd.DataFrame:
     filename = file_storage.filename or ''
@@ -59,7 +67,7 @@ def _read_dataframe(file_storage) -> pd.DataFrame:
     
     file_bytes = file_storage.read()
     if len(file_bytes) > MAX_FILE_SIZE_BYTES:
-        raise ValueError(f"File size exceeds maximum allowed limit of 25MB.")
+        raise ValueError("File size exceeds maximum allowed limit of 25MB.")
     
     stream = io.BytesIO(file_bytes)
     if ext == '.csv':
@@ -67,7 +75,7 @@ def _read_dataframe(file_storage) -> pd.DataFrame:
     elif ext in ('.xlsx', '.xls'):
         df = pd.read_excel(stream, dtype=str)
     else:
-        raise ValueError(f"Unsupported file format. Please upload .xlsx, .xls, or .csv files.")
+        raise ValueError("Unsupported file format. Please upload .xlsx, .xls, or .csv files.")
     
     # Replace NaN with empty string
     return df.fillna('')
@@ -100,18 +108,70 @@ def preview_import_file():
         columns = [c.strip() for c in df.columns]
         total_rows = len(df)
 
+        if total_rows == 0:
+            return jsonify({
+                "success": False,
+                "error": {"code": "EMPTY_FILE", "message": "Spreadsheet contains no data rows."}
+            }), 400
+
         suggested_mapping = {col: _suggest_field(col) for col in columns}
+
+        # Analyze row validity and detect internal duplicates
+        seen_keys = set()
+        duplicate_count = 0
+        valid_count = 0
+        invalid_count = 0
+
+        for _, row in df.iterrows():
+            # Check for business name
+            name = ''
+            phone = ''
+            city = ''
+            for col in columns:
+                target = suggested_mapping.get(col, '')
+                val = str(row[col]).strip() if col in row and pd.notna(row[col]) else ''
+                if target == 'business_name' and val:
+                    name = val
+                elif target == 'phone' and val:
+                    phone = val
+                elif target == 'city' and val:
+                    city = val
+
+            if not name:
+                # Check if any identifier exists
+                if phone:
+                    name = f"Contact {phone}"
+                    valid_count += 1
+                else:
+                    invalid_count += 1
+                    continue
+            else:
+                valid_count += 1
+
+            dedupe_key = DuplicateService.generate_dedupe_key(name, phone, city)
+            if dedupe_key in seen_keys:
+                duplicate_count += 1
+            else:
+                seen_keys.add(dedupe_key)
 
         # Preview first 5 rows as dictionaries
         preview_rows = df.head(5).to_dict(orient='records')
+
+        # Suggested collection name
+        base_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
+        suggested_collection_name = f"Imported - {base_name}"
 
         return jsonify({
             "success": True,
             "data": {
                 "filename": filename,
                 "detected_rows": total_rows,
+                "valid_rows": valid_count - duplicate_count,
+                "duplicate_rows": duplicate_count,
+                "invalid_rows": invalid_count,
                 "detected_columns": columns,
                 "suggested_mapping": suggested_mapping,
+                "suggested_collection_name": suggested_collection_name,
                 "preview": preview_rows
             }
         })
@@ -131,6 +191,9 @@ def execute_import():
         }), 400
 
     file = request.files['file']
+    user = getattr(request, 'current_user', {})
+    user_id = user.get('uid')
+
     mapping_raw = request.form.get('mapping')
     mapping = {}
     if mapping_raw:
@@ -138,6 +201,10 @@ def execute_import():
             mapping = json.loads(mapping_raw)
         except Exception:
             mapping = {}
+
+    collection_name = (request.form.get('collection_name') or '').strip()
+    skip_duplicates_raw = request.form.get('skip_duplicates', 'true')
+    skip_duplicates = str(skip_duplicates_raw).lower() in ('true', '1', 'yes')
 
     try:
         df = _read_dataframe(file)
@@ -147,9 +214,22 @@ def execute_import():
             "error": {"code": "PARSE_ERROR", "message": str(e)}
         }), 400
 
-    # If mapping is empty, auto-detect
+    if len(df) == 0:
+        return jsonify({
+            "success": False,
+            "error": {"code": "EMPTY_FILE", "message": "Spreadsheet contains no data rows."}
+        }), 400
+
+    # Auto-detect mapping if not supplied
     if not mapping:
         mapping = {col: _suggest_field(col) for col in df.columns}
+
+    # Generate collection identity
+    if not collection_name:
+        base_name = file.filename.rsplit('.', 1)[0] if '.' in file.filename else file.filename
+        collection_name = f"Imported - {base_name}"
+
+    col_id = f"col_{int(time.time() * 1000)}_{uuid.uuid4().hex[:4]}"
 
     db = get_firestore_db()
     if db is None:
@@ -163,6 +243,22 @@ def execute_import():
 
     now_iso = datetime.now(timezone.utc).isoformat()
 
+    # Build preset_columns snapshot for this imported collection
+    preset_columns = []
+    for col_name in df.columns:
+        target_field = mapping.get(col_name) or _suggest_field(col_name)
+        if target_field == '__ignore__':
+            continue
+        clean_key = target_field if not target_field.startswith('__custom__') else f"custom_{re.sub(r'[^a-zA-Z0-9_]', '_', col_name.lower()).strip('_')}"
+        preset_columns.append({
+            "key": clean_key,
+            "name": clean_key,
+            "label": col_name,
+            "data_type": "text",
+            "is_enabled": True,
+            "is_required": clean_key == "business_name"
+        })
+
     # Load existing dedupe keys to detect duplicates
     existing_dedupe_keys = set()
     try:
@@ -174,6 +270,7 @@ def execute_import():
     except Exception as e:
         print(f"[ImportRoutes] Dedupe check notice: {e}")
 
+    seen_file_keys = set()
     records_to_commit = []
     inserted_count = 0
     duplicate_count = 0
@@ -195,24 +292,36 @@ def execute_import():
             if target_field == '__ignore__' or not val:
                 continue
             if target_field.startswith('custom_') or target_field == '__custom__':
+                clean_custom_key = f"custom_{re.sub(r'[^a-zA-Z0-9_]', '_', excel_col.lower()).strip('_')}"
                 custom_fields[excel_col] = val
+                custom_fields[clean_custom_key] = val
+                record[clean_custom_key] = val
             else:
                 record[target_field] = val
 
         b_name = record.get('business_name', '').strip()
-        if not b_name:
-            failed_count += 1
-            continue
-
         phone = record.get('phone', '').strip()
         city = record.get('city', '').strip() or 'Andhra Pradesh'
+
+        # If business name is missing, attempt fallback or count as failed
+        if not b_name:
+            if phone or record.get('email'):
+                b_name = record.get('email') or f"Contact {phone}"
+            else:
+                failed_count += 1
+                continue
+
         dedupe_key = DuplicateService.generate_dedupe_key(b_name, phone, city)
+        is_duplicate = (dedupe_key in existing_dedupe_keys) or (dedupe_key in seen_file_keys)
 
-        if dedupe_key in existing_dedupe_keys:
+        if is_duplicate:
             duplicate_count += 1
-            continue
+            if skip_duplicates:
+                continue
 
+        seen_file_keys.add(dedupe_key)
         existing_dedupe_keys.add(dedupe_key)
+
         doc_id = f"ven_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
 
         quality_score = ValidationService.calculate_quality_score({
@@ -227,9 +336,11 @@ def execute_import():
 
         vendor_doc = {
             "id": doc_id,
+            "collection_id": col_id,
+            "user_id": user_id,
             "business_name": b_name,
             "normalized_name": b_name.upper(),
-            "category": record.get('category', 'General'),
+            "category": record.get('category', collection_name),
             "subcategory": record.get('subcategory', ''),
             "phone": phone,
             "alternate_phone": record.get('alternate_phone', ''),
@@ -251,10 +362,16 @@ def execute_import():
             "created_at": now_iso,
             "updated_at": now_iso
         }
+
+        # Stamp custom columns directly on vendor document for instant display
+        for ck, cv in custom_fields.items():
+            if ck not in vendor_doc:
+                vendor_doc[ck] = cv
+
         records_to_commit.append(vendor_doc)
         inserted_count += 1
 
-    # Chunked batch commit (<= 450 documents/commit respecting Firestore 500-limit)
+    # Chunked batch commit of vendor leads (<= 450 documents/commit respecting Firestore 500-limit)
     try:
         col_ref = db.collection('vendors')
         if col_ref is None:
@@ -275,9 +392,48 @@ def execute_import():
             "error": {"code": "DATABASE_ERROR", "message": f"Firestore batch commit failed: {str(e)}"}
         }), 500
 
+    # Create Collection Document in Firestore 'collections' collection
+    collection_doc = {
+        "id": col_id,
+        "name": collection_name,
+        "category": collection_name,
+        "location": f"Imported ({file.filename})",
+        "target_count": len(df),
+        "source": "excel_import",
+        "source_name": f"Excel Import ({file.filename})",
+        "current_source": f"Excel Import ({file.filename})",
+        "filename": file.filename,
+        "type": "import",
+        "user_id": user_id,
+        "preset_id": "preset_imported",
+        "preset_name": collection_name,
+        "preset_columns": preset_columns,
+        "found": len(df),
+        "found_count": len(df),
+        "valid": inserted_count,
+        "valid_count": inserted_count,
+        "duplicate": duplicate_count,
+        "duplicate_count": duplicate_count,
+        "failed": failed_count,
+        "failed_count": failed_count,
+        "progress": 100,
+        "status": "completed",
+        "error_message": None,
+        "started_at": now_iso,
+        "completed_at": now_iso,
+        "updated_at": now_iso
+    }
+
+    try:
+        db.collection('collections').document(col_id).set(collection_doc)
+    except Exception as col_err:
+        print(f"[ImportRoutes] Notice: Could not save collection document: {col_err}")
+
     return jsonify({
         "success": True,
         "data": {
+            "collection_id": col_id,
+            "collection_name": collection_name,
             "filename": file.filename,
             "total_rows": len(df),
             "inserted": inserted_count,
@@ -285,5 +441,5 @@ def execute_import():
             "failed": failed_count,
             "timestamp": now_iso
         },
-        "message": f"Successfully processed {len(df)} rows: {inserted_count} inserted, {duplicate_count} duplicates skipped, {failed_count} invalid."
+        "message": f"Successfully created collection '{collection_name}' with {inserted_count} record(s) imported ({duplicate_count} duplicate(s) handled, {failed_count} invalid)."
     })

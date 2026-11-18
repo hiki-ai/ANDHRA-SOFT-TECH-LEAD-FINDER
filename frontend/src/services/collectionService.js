@@ -17,6 +17,10 @@ export const collectionService = {
     return res;
   },
 
+  async listCollections(params = {}) {
+    return await this.getCollections(params);
+  },
+
   async getCollectionById(id) {
     const res = await apiClient.get(`/collections/${id}`);
     return res;

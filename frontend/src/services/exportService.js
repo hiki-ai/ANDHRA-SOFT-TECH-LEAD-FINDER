@@ -18,6 +18,40 @@ export const exportService = {
     return res?.data || res;
   },
 
+  async createExport(options = {}) {
+    return await this.triggerExport(options);
+  },
+
+  /**
+   * Download a previously generated export by ID
+   */
+  async downloadExport(exportId, defaultFilename = 'andhra_soft_tech_leads.xlsx') {
+    const downloadPath = `/exports/${exportId}/download`;
+    try {
+      const blobResponse = await apiClient.get(downloadPath, {
+        responseType: 'blob',
+      });
+      const blob = blobResponse instanceof Blob
+        ? blobResponse
+        : new Blob([blobResponse], {
+            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          });
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.setAttribute('download', defaultFilename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      const base = apiClient.defaults.baseURL || '';
+      const cleanBase = base.replace(/\/api\/v1\/?$/, '');
+      const fullUrl = `${cleanBase}${downloadPath}`;
+      window.open(fullUrl, '_blank');
+    }
+  },
+
   /**
    * Trigger immediate validated file download in browser using Blob / Object URL.
    * Completely prevents the "Invalid file format or corrupted file" error by

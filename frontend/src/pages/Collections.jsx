@@ -14,6 +14,8 @@ import {
   RefreshCw,
   AlertCircle,
   FolderOpen,
+  Upload,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
@@ -22,6 +24,8 @@ import { Select } from '../components/common/Select';
 import { ProgressBar } from '../components/common/ProgressBar';
 import { formatNumber, formatDate } from '../utils/formatters';
 import { collectionService } from '../services/collectionService';
+import { exportService } from '../services/exportService';
+import { useToast } from '../context/ToastContext';
 
 const statusVariantMap = {
   running: 'running',
@@ -36,10 +40,12 @@ export function Collections() {
   const [collections, setCollections] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [exportingId, setExportingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const { onOpenNewJob } = useOutletContext() || {};
   const navigate = useNavigate();
+  const toast = useToast();
 
   const loadCollections = async () => {
     setLoading(true);
@@ -60,6 +66,24 @@ export function Collections() {
   useEffect(() => {
     loadCollections();
   }, []);
+
+  const handleDownloadExcel = async (e, col) => {
+    e.stopPropagation();
+    setExportingId(col.id);
+    try {
+      toast.info(`Generating Excel file for "${col.name || col.category || 'leads'}"...`);
+      await exportService.downloadDirectly({
+        collection_id: col.id,
+        format: 'xlsx',
+      });
+      toast.success('Excel spreadsheet downloaded.');
+    } catch (err) {
+      console.error('[Collections] Download error:', err);
+      toast.error(err?.message || 'Failed to download collection Excel file.');
+    } finally {
+      setExportingId(null);
+    }
+  };
 
   const filtered = collections.filter((col) => {
     const matchesSearch =
@@ -84,7 +108,7 @@ export function Collections() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Button
             variant="outline"
             size="sm"
@@ -93,6 +117,14 @@ export function Collections() {
             onClick={loadCollections}
           >
             Refresh
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            iconLeft={Upload}
+            onClick={() => navigate('/import')}
+          >
+            Import Excel
           </Button>
           <Button
             variant="primary"
@@ -188,7 +220,10 @@ export function Collections() {
                           ? 'No collections match the specified filter criteria.'
                           : 'No extraction jobs have been executed yet.'}
                       </p>
-                      <div className="pt-2">
+                      <div className="pt-2 flex items-center justify-center gap-2">
+                        <Button size="sm" variant="outline" iconLeft={Upload} onClick={() => navigate('/import')}>
+                          Import Excel Leads
+                        </Button>
                         <Button size="sm" variant="primary" iconLeft={Plus} onClick={onOpenNewJob}>
                           Start New Collection
                         </Button>
@@ -204,10 +239,16 @@ export function Collections() {
                     className="table-row-hover transition-colors cursor-pointer group"
                   >
                     <td className="py-3.5 px-4 font-mono font-medium text-surface-800">
-                      {col.id}
+                      <div>{col.id}</div>
+                      {col.source === 'excel_import' && (
+                        <span className="inline-flex items-center gap-1 mt-0.5 text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">
+                          <FileSpreadsheet className="w-2.5 h-2.5" />
+                          IMPORT
+                        </span>
+                      )}
                     </td>
                     <td className="py-3.5 px-4 font-semibold text-surface-900">
-                      {col.category}
+                      {col.category || col.name}
                     </td>
                     <td className="py-3.5 px-4 text-surface-600">
                       {col.location}
@@ -255,14 +296,25 @@ export function Collections() {
                       {formatDate(col.started_at)}
                     </td>
                     <td className="py-3.5 px-4 text-right">
-                      <Link
-                        to={`/collections/${col.id}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center gap-1 text-brand-600 hover:text-brand-800 font-semibold group-hover:underline"
-                      >
-                        <span>Details</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </Link>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          title="Download Excel Spreadsheet (.xlsx)"
+                          disabled={exportingId === col.id || (col.valid_count ?? col.valid ?? 0) === 0}
+                          onClick={(e) => handleDownloadExcel(e, col)}
+                          className="p-1.5 rounded-lg border border-surface-200 text-surface-600 hover:text-emerald-700 hover:bg-emerald-50 hover:border-emerald-200 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                        >
+                          <Download className={`w-3.5 h-3.5 ${exportingId === col.id ? 'animate-bounce text-emerald-600' : ''}`} />
+                        </button>
+                        <Link
+                          to={`/collections/${col.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 text-brand-600 hover:text-brand-800 font-semibold group-hover:underline"
+                        >
+                          <span>Details</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))

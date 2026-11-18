@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Upload,
   FileSpreadsheet,
@@ -7,27 +8,35 @@ import {
   RotateCcw,
   RefreshCw,
   AlertCircle,
+  FolderPlus,
+  Download,
+  Layers,
   Copy,
   AlertOctagon,
   FileCheck,
+  Check,
 } from 'lucide-react';
 import { Button } from '../components/common/Button';
 import { Select } from '../components/common/Select';
+import { Input } from '../components/common/Input';
 import { useToast } from '../context/ToastContext';
 import { importService } from '../services/importService';
+import { exportService } from '../services/exportService';
 import { formatNumber } from '../utils/formatters';
 
 const DB_FIELDS = [
-  { value: 'business_name', label: 'Business Name (Required)' },
-  { value: 'category', label: 'Category' },
+  { value: 'business_name', label: 'Business / Company Name (Required)' },
+  { value: 'category', label: 'Industry / Category' },
+  { value: 'subcategory', label: 'Subcategory' },
   { value: 'phone', label: 'Primary Phone' },
   { value: 'alternate_phone', label: 'Alternate Phone' },
   { value: 'email', label: 'Email Address' },
   { value: 'website', label: 'Website URL' },
+  { value: 'linkedin', label: 'LinkedIn Profile URL' },
   { value: 'address', label: 'Street Address' },
-  { value: 'city', label: 'City' },
+  { value: 'city', label: 'City / Town' },
   { value: 'state', label: 'State' },
-  { value: 'pincode', label: 'Pincode' },
+  { value: 'pincode', label: 'Pincode / ZIP' },
   { value: 'rating', label: 'Rating' },
   { value: 'review_count', label: 'Review Count' },
   { value: '__custom__', label: '+ Save as Custom Field' },
@@ -37,12 +46,16 @@ const DB_FIELDS = [
 export function ExcelImport() {
   const [step, setStep] = useState(1);
   const [file, setFile] = useState(null);
+  const [collectionName, setCollectionName] = useState('');
+  const [skipDuplicates, setSkipDuplicates] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [previewData, setPreviewData] = useState(null);
   const [columnMappings, setColumnMappings] = useState({});
   const [importResult, setImportResult] = useState(null);
   const [error, setError] = useState(null);
   const toast = useToast();
+  const navigate = useNavigate();
 
   const handleFileDrop = async (e) => {
     e.preventDefault();
@@ -65,6 +78,7 @@ export function ExcelImport() {
       const data = res?.data || res;
       setPreviewData(data);
       setColumnMappings(data.suggested_mapping || {});
+      setCollectionName(data.suggested_collection_name || `Imported - ${droppedFile.name.replace(/\.[^/.]+$/, '')}`);
       setStep(2);
       toast.success(`Detected ${data.detected_rows || 0} rows and ${data.detected_columns?.length || 0} columns.`);
     } catch (err) {
@@ -87,13 +101,18 @@ export function ExcelImport() {
     setError(null);
 
     try {
-      toast.info('Starting batch commit to Cloud Firestore...');
-      const res = await importService.executeImport(file, columnMappings);
+      toast.info('Starting batch commit and creating collection...');
+      const res = await importService.executeImport({
+        file,
+        mapping: columnMappings,
+        collection_name: collectionName.trim(),
+        skip_duplicates: skipDuplicates,
+      });
       const data = res?.data || res;
       setImportResult(data);
       setStep(3);
       toast.success(
-        `Import completed: ${data.inserted || 0} inserted, ${data.duplicate || 0} duplicates skipped.`
+        `Collection created: ${data.inserted || 0} leads imported (${data.duplicate || 0} duplicates skipped).`
       );
     } catch (err) {
       console.error('[ExcelImport] Execute error:', err);
@@ -104,8 +123,28 @@ export function ExcelImport() {
     }
   };
 
+  const handleDownloadExcel = async () => {
+    if (!importResult?.collection_id) return;
+    setIsExporting(true);
+    try {
+      toast.info('Generating real Excel (.xlsx) file...');
+      await exportService.downloadDirectly({
+        collection_id: importResult.collection_id,
+        format: 'xlsx',
+      });
+      toast.success('Excel download initiated.');
+    } catch (err) {
+      console.error('[ExcelImport] Download error:', err);
+      toast.error(err?.message || 'Failed to generate Excel download.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const handleReset = () => {
     setFile(null);
+    setCollectionName('');
+    setSkipDuplicates(true);
     setPreviewData(null);
     setColumnMappings({});
     setImportResult(null);
@@ -120,7 +159,7 @@ export function ExcelImport() {
           Import Excel / CSV Leads
         </h1>
         <p className="text-xs text-surface-500 mt-1">
-          Ingest raw vendor spreadsheets with column mapping, automated deduplication, and pre-import validation.
+          Ingest raw vendor spreadsheets into Cloud Firestore collections with automated deduplication, column mapping, and instant Excel re-export.
         </p>
       </div>
 
@@ -141,7 +180,7 @@ export function ExcelImport() {
           >
             2
           </span>
-          <span>Map Columns & Preview</span>
+          <span>Map Columns & Configure Collection</span>
         </div>
         <div className="h-0.5 flex-1 bg-surface-200 mx-4" />
         <div className={`flex items-center gap-2 font-semibold ${step === 3 ? 'text-brand-600' : 'text-surface-400'}`}>
@@ -152,7 +191,7 @@ export function ExcelImport() {
           >
             3
           </span>
-          <span>Import Summary</span>
+          <span>Collection Created</span>
         </div>
       </div>
 
@@ -206,31 +245,100 @@ export function ExcelImport() {
         </div>
       )}
 
-      {/* Step 2: Mapping & Preview */}
+      {/* Step 2: Mapping, Collection Settings & Preview */}
       {step === 2 && previewData && (
         <div className="space-y-6">
-          <div className="p-4 bg-white rounded-2xl border border-surface-200 shadow-card flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <FileSpreadsheet className="w-6 h-6 text-brand-600" />
-              <div>
-                <h4 className="text-sm font-bold text-surface-900">
-                  {file?.name}
-                </h4>
-                <p className="text-xs text-surface-500">
-                  Detected {formatNumber(previewData.detected_rows || 0)} rows • {previewData.detected_columns?.length || 0} columns
-                </p>
+          {/* File summary and collection name configuration */}
+          <div className="p-5 bg-white rounded-2xl border border-surface-200 shadow-card space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-surface-100">
+              <div className="flex items-center gap-3">
+                <FileSpreadsheet className="w-7 h-7 text-brand-600 shrink-0" />
+                <div>
+                  <h4 className="text-sm font-bold text-surface-900">
+                    {file?.name}
+                  </h4>
+                  <p className="text-xs text-surface-500">
+                    Detected {formatNumber(previewData.detected_rows || 0)} total rows • {previewData.detected_columns?.length || 0} columns
+                  </p>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" onClick={handleReset}>
+                Choose Another File
+              </Button>
+            </div>
+
+            {/* Quality & Pre-scan telemetry cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="p-3 bg-surface-50 rounded-xl border border-surface-200">
+                <span className="text-[10px] font-bold text-surface-500 uppercase block">Total Rows</span>
+                <span className="text-lg font-black text-surface-900">{formatNumber(previewData.detected_rows || 0)}</span>
+              </div>
+              <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200">
+                <span className="text-[10px] font-bold text-emerald-700 uppercase block">Valid Leads</span>
+                <span className="text-lg font-black text-emerald-800">{formatNumber(previewData.valid_rows || 0)}</span>
+              </div>
+              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200">
+                <span className="text-[10px] font-bold text-amber-700 uppercase block">Duplicates Detected</span>
+                <span className="text-lg font-black text-amber-800">{formatNumber(previewData.duplicate_rows || 0)}</span>
+              </div>
+              <div className="p-3 bg-rose-50 rounded-xl border border-rose-200">
+                <span className="text-[10px] font-bold text-rose-700 uppercase block">Empty / Invalid</span>
+                <span className="text-lg font-black text-rose-800">{formatNumber(previewData.invalid_rows || 0)}</span>
               </div>
             </div>
-            <Button variant="outline" size="sm" onClick={handleReset}>
-              Choose Another File
-            </Button>
+
+            {/* Collection Configuration Inputs */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+              <div>
+                <label className="block text-xs font-bold text-surface-800 mb-1">
+                  Collection Name (Required)
+                </label>
+                <Input
+                  value={collectionName}
+                  onChange={(e) => setCollectionName(e.target.value)}
+                  placeholder="e.g. Imported - Andhra Tech Vendors"
+                  iconLeft={FolderPlus}
+                />
+                <p className="text-[10px] text-surface-400 mt-1">
+                  This collection will appear in your Collections history with all imported leads.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-surface-800 mb-1">
+                  Duplicate Handling
+                </label>
+                <div className="p-3 bg-surface-50 rounded-xl border border-surface-200 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-semibold text-surface-800 block">
+                      Skip Duplicate Records
+                    </span>
+                    <span className="text-[10px] text-surface-500">
+                      Ignores rows with existing phone numbers or business identities
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={skipDuplicates}
+                    onChange={(e) => setSkipDuplicates(e.target.checked)}
+                    className="w-4 h-4 text-brand-600 rounded border-surface-300 focus:ring-brand-500"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
+          {/* Column Mapping Table */}
           <div className="bg-white rounded-2xl border border-surface-200 shadow-card overflow-hidden">
             <div className="p-4 border-b border-surface-100 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-surface-900">Column Mapping</h3>
-              <span className="text-xs text-surface-500">
-                Map columns from your file into database fields
+              <div>
+                <h3 className="text-sm font-bold text-surface-900">Column Header Mapping</h3>
+                <p className="text-xs text-surface-500 mt-0.5">
+                  Confirm or adjust how spreadsheet columns map into AST lead fields. Custom columns are fully preserved.
+                </p>
+              </div>
+              <span className="text-xs font-mono text-surface-400">
+                {previewData.detected_columns?.length || 0} fields
               </span>
             </div>
 
@@ -251,7 +359,7 @@ export function ExcelImport() {
                         <span className="text-xs font-semibold text-surface-900 block">{colName}</span>
                         {sampleVal && (
                           <span className="text-[10px] text-surface-400 font-mono truncate block">
-                            Sample: "{String(sampleVal).slice(0, 40)}"
+                            Sample: "{String(sampleVal).slice(0, 45)}"
                           </span>
                         )}
                       </div>
@@ -260,7 +368,7 @@ export function ExcelImport() {
                       </div>
                       <div className="w-full sm:w-1/2">
                         <Select
-                          value={columnMappings[colName] || '__ignore__'}
+                          value={columnMappings[colName] || '__custom__'}
                           onChange={(e) => handleMappingChange(colName, e.target.value)}
                           options={DB_FIELDS}
                         />
@@ -270,24 +378,31 @@ export function ExcelImport() {
                 })}
             </div>
 
-            <div className="p-4 bg-surface-50 border-t border-surface-100 flex items-center justify-between">
+            <div className="p-4 bg-surface-50 border-t border-surface-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <span className="text-xs text-surface-500">
-                Duplicates are identified automatically and skipped without dropping unique leads.
+                {skipDuplicates
+                  ? 'Duplicate records will be filtered automatically.'
+                  : 'All rows including duplicates will be committed to the collection.'}
               </span>
-              <Button
-                variant="primary"
-                onClick={handleConfirmImport}
-                isLoading={isProcessing}
-                iconRight={ArrowRight}
-              >
-                Confirm & Import into Database
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={handleReset}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleConfirmImport}
+                  isLoading={isProcessing}
+                  iconRight={ArrowRight}
+                >
+                  Confirm & Create Collection
+                </Button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Step 3: Telemetry & Summary */}
+      {/* Step 3: Success Confirmation & Actions */}
       {step === 3 && importResult && (
         <div className="bg-white p-8 rounded-2xl border border-surface-200 shadow-card text-center space-y-6">
           <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border border-emerald-100">
@@ -296,10 +411,10 @@ export function ExcelImport() {
 
           <div>
             <h3 className="text-xl font-bold text-surface-900">
-              Import Completed Successfully
+              Collection Created & Leads Imported
             </h3>
-            <p className="text-xs text-surface-500 mt-1">
-              Spreadsheet data was processed and committed to Cloud Firestore in chunked batches.
+            <p className="text-xs text-surface-600 mt-1">
+              Collection <strong className="text-surface-900 font-mono">"{importResult.collection_name}"</strong> has been saved in Firestore.
             </p>
           </div>
 
@@ -319,7 +434,7 @@ export function ExcelImport() {
             </div>
 
             <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
-              <span className="text-[10px] font-semibold text-amber-700 uppercase block">Duplicates Skipped</span>
+              <span className="text-[10px] font-semibold text-amber-700 uppercase block">Duplicates Handled</span>
               <span className="text-xl font-bold text-amber-800">
                 {formatNumber(importResult.duplicate || 0)}
               </span>
@@ -333,17 +448,26 @@ export function ExcelImport() {
             </div>
           </div>
 
-          <div className="pt-2 flex items-center justify-center gap-3">
-            <Button variant="outline" size="sm" onClick={handleReset} iconLeft={RotateCcw}>
-              Import Another File
+          <div className="pt-4 flex flex-wrap items-center justify-center gap-3">
+            <Button
+              variant="outline"
+              size="md"
+              iconLeft={Download}
+              isLoading={isExporting}
+              onClick={handleDownloadExcel}
+            >
+              Download Excel (.xlsx)
             </Button>
             <Button
               variant="primary"
-              size="sm"
+              size="md"
               iconRight={ArrowRight}
-              onClick={() => (window.location.href = '/vendors')}
+              onClick={() => navigate(`/collections/${importResult.collection_id}`)}
             >
-              View in Vendor Database
+              Open Collection View
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleReset} iconLeft={RotateCcw}>
+              Import Another Spreadsheet
             </Button>
           </div>
         </div>
