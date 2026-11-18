@@ -59,7 +59,15 @@ class PlanService:
         if total_docs == 0:
             plans = [dict(p) for p in INITIAL_PLANS if p.get('is_active', True)]
 
-        plans.sort(key=lambda x: int(x.get('display_order', 99)))
+        def _plan_sort_key(item: Dict[str, Any]) -> int:
+            val = item.get('display_order', 99)
+            if isinstance(val, int):
+                return val
+            if isinstance(val, str) and val.isdigit():
+                return int(val)
+            return 99
+
+        plans.sort(key=_plan_sort_key)
         return plans
 
     @staticmethod
@@ -87,7 +95,15 @@ class PlanService:
         if total_docs == 0:
             plans = [dict(p) for p in INITIAL_PLANS]
 
-        plans.sort(key=lambda x: int(x.get('display_order', 99)))
+        def _all_plans_sort_key(item: Dict[str, Any]) -> int:
+            val = item.get('display_order', 99)
+            if isinstance(val, int):
+                return val
+            if isinstance(val, str) and val.isdigit():
+                return int(val)
+            return 99
+
+        plans.sort(key=_all_plans_sort_key)
         return plans
 
     @staticmethod
@@ -130,18 +146,22 @@ class PlanService:
             if existing:
                 raise ValueError(f"A plan with identifier '{plan_id}' already exists. Please choose a unique identifier.")
 
-        monthly_price_paise = int(plan_data.get('monthly_price_paise', 0))
-        yearly_price_paise = int(plan_data.get('yearly_price_paise', 0))
+        raw_m = plan_data.get('monthly_price_paise', 0)
+        monthly_price_paise = raw_m if isinstance(raw_m, int) else (int(raw_m) if str(raw_m).isdigit() else 0)
+
+        raw_y = plan_data.get('yearly_price_paise', 0)
+        yearly_price_paise = raw_y if isinstance(raw_y, int) else (int(raw_y) if str(raw_y).isdigit() else 0)
+
         m_inr = plan_data.get('monthly_price_inr')
         if not monthly_price_paise and m_inr is not None:
             try:
-                monthly_price_paise = int(round(float(m_inr) * 100))
+                monthly_price_paise = round(float(m_inr) * 100)
             except (ValueError, TypeError):
                 monthly_price_paise = 0
         y_inr = plan_data.get('yearly_price_inr')
         if not yearly_price_paise and y_inr is not None:
             try:
-                yearly_price_paise = int(round(float(y_inr) * 100))
+                yearly_price_paise = round(float(y_inr) * 100)
             except (ValueError, TypeError):
                 yearly_price_paise = 0
 

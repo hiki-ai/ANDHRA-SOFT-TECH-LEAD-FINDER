@@ -235,14 +235,19 @@ class TestExcelImportExportE2E(unittest.TestCase):
         self.assertIsNotNone(wb.active, "Workbook has no active worksheet")
         sheet = wb.active
         assert sheet is not None
-        headers = [cell.value for cell in sheet[1]]
+        # Check rows using iter_rows(values_only=True)
+        rows = list(sheet.iter_rows(values_only=True))
+        self.assertEqual(len(rows), 3) # Header + 2 data rows
+
+        # With values_only=True, each row is a tuple of scalar cell values accessed by index
+        headers = list(rows[0])
         self.assertIn('Business Name', headers)
         self.assertIn('Phone', headers)
         self.assertIn('Export Custom Field', headers)
 
-        # Check rows
-        rows = list(sheet.iter_rows(values_only=True))
-        self.assertEqual(len(rows), 3) # Header + 2 data rows
+        first_lead = rows[1]
+        self.assertEqual(first_lead[0], 'Vizag Steel Exporters')
+        self.assertEqual(first_lead[1], '9888811111')
         print(f"[PASS] 4. Collection export generated valid .xlsx workbook with custom fields ({len(res_dl.data)} bytes).")
 
     def test_05_deduplication_toggle(self):

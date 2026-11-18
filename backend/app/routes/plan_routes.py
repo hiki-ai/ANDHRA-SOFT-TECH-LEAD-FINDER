@@ -23,18 +23,22 @@ def get_public_plans():
     plans = PlanService.get_active_plans()
     formatted = []
     for p in plans:
-        m_paise = int(p.get('monthly_price_paise', 0))
-        y_paise = int(p.get('yearly_price_paise', 0))
+        raw_m = p.get('monthly_price_paise', 0)
+        m_paise = raw_m if isinstance(raw_m, int) else (int(raw_m) if str(raw_m).isdigit() else 0)
+
+        raw_y = p.get('yearly_price_paise', 0)
+        y_paise = raw_y if isinstance(raw_y, int) else (int(raw_y) if str(raw_y).isdigit() else 0)
+
         m_inr = p.get('monthly_price_inr')
         if not m_paise and m_inr is not None:
             try:
-                m_paise = int(round(float(m_inr) * 100))
+                m_paise = round(float(m_inr) * 100)
             except (ValueError, TypeError):
                 m_paise = 0
         y_inr = p.get('yearly_price_inr')
         if not y_paise and y_inr is not None:
             try:
-                y_paise = int(round(float(y_inr) * 100))
+                y_paise = round(float(y_inr) * 100)
             except (ValueError, TypeError):
                 y_paise = 0
 

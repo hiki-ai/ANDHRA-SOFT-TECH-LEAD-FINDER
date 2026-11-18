@@ -89,19 +89,27 @@ def create_export():
             data = doc.to_dict() or {}
             data['id'] = doc.id
 
-            if collection_id and str(data.get('collection_id', '')).strip() != str(collection_id).strip():
+            doc_col_id = data.get('collection_id') or ''
+            if collection_id and doc_col_id.strip() != collection_id.strip():
                 continue
-            if category and str(data.get('category', '')).strip().lower() != category.strip().lower():
+
+            doc_category = data.get('category') or ''
+            if category and doc_category.strip().lower() != category.strip().lower():
                 continue
-            if city and str(data.get('city', '')).strip().lower() != city.strip().lower():
+
+            doc_city = data.get('city') or ''
+            if city and doc_city.strip().lower() != city.strip().lower():
                 continue
-            if status and str(data.get('status', '')).strip().lower() != status.strip().lower():
+
+            doc_status = data.get('status') or ''
+            if status and doc_status.strip().lower() != status.strip().lower():
                 continue
+
             if search:
                 q = search.strip().lower()
-                name = str(data.get('business_name', '')).lower()
-                ph = str(data.get('phone', ''))
-                c = str(data.get('city', '')).lower()
+                name = (data.get('business_name') or '').lower()
+                ph = data.get('phone') or ''
+                c = (data.get('city') or '').lower()
                 if q not in name and q not in ph and q not in c:
                     continue
 
@@ -146,21 +154,17 @@ def create_export():
         if header_name and header_name not in ordered_headers:
             ordered_headers.append(header_name)
 
-    for extra_k in sorted(discovered_custom_keys):
-        extra_header = str(extra_k).strip()
-        if extra_header and extra_header not in ordered_headers:
-            ordered_headers.append(extra_header)
+    if not preset_id:
+        for extra_k in sorted(discovered_custom_keys):
+            extra_header = str(extra_k).strip()
+            if extra_header and extra_header not in ordered_headers:
+                ordered_headers.append(extra_header)
 
-    if rows:
-        df = pd.DataFrame(rows)
-        # Ensure exact column order and presence of all configured columns
-        for col_name in ordered_headers:
-            if col_name not in df.columns:
-                df[col_name] = ""
-        df = df[ordered_headers]
-    else:
-        # Guarantee valid XLSX headers even when zero records match query
-        df = pd.DataFrame(columns=ordered_headers)
+    df = pd.DataFrame(data=rows, columns=ordered_headers)
+    for col_name in ordered_headers:
+        if col_name not in df.columns:
+            df[col_name] = ""
+    df = df[ordered_headers]
 
     export_id = f"exp_{int(time.time() * 1000)}"
 
@@ -176,10 +180,10 @@ def create_export():
         filename = f"AST_{clean_title}_{date_str}.csv"
     else:
         with pd.ExcelWriter(stream, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Leads')
+            df.to_excel(writer, index=False, sheet_name='Vendors')
             # Auto-adjust column widths for premium XLSX aesthetic
             try:
-                ws = writer.sheets['Leads']
+                ws = writer.sheets['Vendors']
                 for col in ws.columns:
                     max_len = max(len(str(cell.value or '')) for cell in col)
                     col_letter = col[0].column_letter
