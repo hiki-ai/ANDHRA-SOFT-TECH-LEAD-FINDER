@@ -104,6 +104,35 @@ export const billingService = {
     return extractData(res, {});
   },
 
+  // Standard Razorpay Web Checkout Endpoints
+  async createStandardOrder({ amount, currency = 'INR', receipt, notes } = {}) {
+    const res = await apiClient.post('/create-order', {
+      amount,
+      currency,
+      receipt,
+      notes,
+    });
+    return extractData(res, res?.data || res);
+  },
+
+  async createOrder(params) {
+    return this.createStandardOrder(params);
+  },
+
+  async verifyStandardPayment({ razorpay_order_id, razorpay_payment_id, razorpay_signature, payment_method } = {}) {
+    const res = await apiClient.post('/verify-payment', {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      payment_method,
+    });
+    return extractData(res, res?.data || res);
+  },
+
+  async verifyOrderPayment(params) {
+    return this.verifyStandardPayment(params);
+  },
+
   async getUserPaymentHistory() {
     const res = await apiClient.get('/payments/history');
     return extractData(res, []);

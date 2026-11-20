@@ -5,8 +5,23 @@
 
 export function loadRazorpayScript() {
   return new Promise((resolve) => {
-    if (window.Razorpay) {
+    if (typeof window !== 'undefined' && window.Razorpay) {
       resolve(true);
+      return;
+    }
+
+    // Check if script is already present in document head or body
+    const existingScript = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
+    if (existingScript) {
+      if (typeof window !== 'undefined' && window.Razorpay) {
+        resolve(true);
+        return;
+      }
+      existingScript.addEventListener('load', () => resolve(true));
+      existingScript.addEventListener('error', () => {
+        console.error('[Razorpay] Existing Checkout SDK script failed to load.');
+        resolve(false);
+      });
       return;
     }
 
@@ -15,38 +30,46 @@ export function loadRazorpayScript() {
     script.async = true;
     script.onload = () => resolve(true);
     script.onerror = () => {
-      console.error('[Razorpay] Failed to load Checkout SDK script.');
+      console.error('[Razorpay] Failed to load Checkout SDK script from CDN.');
       resolve(false);
     };
-    document.body.appendChild(script);
+    document.head.appendChild(script);
   });
 }
 
 export async function initiateRazorpayPayment({
   order,
   user,
+  name = 'ANDHRA SOFT TECH',
+  description,
   onSuccess,
   onFailure,
   onDismiss,
 }) {
   const isLoaded = await loadRazorpayScript();
-  if (!isLoaded || !window.Razorpay) {
+  if (!isLoaded || typeof window === 'undefined' || !window.Razorpay) {
     throw new Error('Razorpay payment gateway script could not be loaded. Please check your network connection.');
   }
 
   const razorpayKey = order.key_id || import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_placeholder';
+  const paymentAmount = order.amount || order.amount_paise;
+
+  const desc =
+    description ||
+    order.description ||
+    (order.plan_name ? `${order.plan_name} Subscription (${order.billing_cycle || 'monthly'})` : 'AST Extractor Payment');
 
   const options = {
     key: razorpayKey,
-    amount: order.amount_paise,
+    amount: paymentAmount,
     currency: order.currency || 'INR',
-    name: 'Andhra Soft Tech',
-    description: `${order.plan_name || 'Premium'} Subscription (${order.billing_cycle})`,
+    name: name || 'ANDHRA SOFT TECH',
+    description: desc,
     order_id: order.order_id,
     prefill: {
-      name: user?.displayName || user?.fullName || '',
+      name: user?.displayName || user?.fullName || user?.name || '',
       email: user?.email || '',
-      contact: user?.phone || '',
+      contact: user?.phone || user?.phoneNumber || '',
     },
     theme: {
       color: '#4f46e5', // Indigo brand accent
@@ -86,4 +109,3 @@ export async function initiateRazorpayPayment({
 
   rzp.open();
 }
-

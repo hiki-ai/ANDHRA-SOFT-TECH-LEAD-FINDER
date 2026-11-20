@@ -24,7 +24,7 @@ from .routes.category_routes import category_bp
 from .routes.plan_routes import plan_bp, public_bp
 from .routes.trial_routes import trial_bp
 from .routes.subscription_routes import sub_bp
-from .routes.payment_routes import payment_bp
+from .routes.payment_routes import payment_bp, standard_checkout_bp
 from .routes.user_routes import user_bp
 from .routes.admin_billing_routes import admin_billing_bp
 
@@ -98,6 +98,7 @@ def create_app(config_name=None):
     app.register_blueprint(trial_bp)
     app.register_blueprint(sub_bp)
     app.register_blueprint(payment_bp)
+    app.register_blueprint(standard_checkout_bp)
     app.register_blueprint(user_bp)
     app.register_blueprint(admin_billing_bp)
 
@@ -107,10 +108,12 @@ def create_app(config_name=None):
     app.register_blueprint(trial_bp, name='trial_v1_alias', url_prefix='/api/v1/trial')
     app.register_blueprint(sub_bp, name='sub_v1_alias', url_prefix='/api/v1/subscriptions')
     app.register_blueprint(payment_bp, name='payment_v1_alias', url_prefix='/api/v1/payments')
+    app.register_blueprint(standard_checkout_bp, name='standard_checkout_v1_alias', url_prefix='/api/v1')
     app.register_blueprint(user_bp, name='user_v1_alias', url_prefix='/api/v1/user')
     app.register_blueprint(admin_billing_bp, name='admin_billing_v1_alias', url_prefix='/api/v1/admin')
 
     # Register un-prefixed aliases for maximum resilience
+    app.register_blueprint(standard_checkout_bp, name='standard_checkout_root_alias', url_prefix='')
     app.register_blueprint(auth_bp, name='auth_alias', url_prefix='/auth')
     app.register_blueprint(vendor_bp, name='vendors_alias', url_prefix='/vendors')
     app.register_blueprint(collection_bp, name='collections_alias', url_prefix='/collections')

@@ -100,15 +100,18 @@ class PaymentService:
         user_email: str,
         plan_id: str,
         billing_cycle: str,
-        amount_paise: int
+        amount_paise: int,
+        currency: str = "INR",
+        receipt: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Creates an authorized payment order with Razorpay or test order in test mode.
+        Minimum allowed amount is 100 paise (₹1.00).
         """
-        if amount_paise <= 0:
-            raise ValueError("Payment amount must be greater than zero paise.")
+        if amount_paise < 100:
+            raise ValueError("Payment amount must be at least 100 paise (₹1.00).")
 
-        receipt_id = f"rcpt_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
+        receipt_id = receipt or f"rcpt_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
         key_id = Settings.get_razorpay_key_id()
         key_secret = Settings.get_razorpay_key_secret()
 
@@ -117,39 +120,62 @@ class PaymentService:
 
         if key_id and key_secret:
             try:
-                res = requests.post(
-                    "https://api.razorpay.com/v1/orders",
-                    auth=(key_id, key_secret),
-                    json={
-                        "amount": amount_paise,
-                        "currency": "INR",
-                        "receipt": receipt_id,
-                        "notes": {
-                            "user_id": user_id,
-                            "user_email": user_email,
-                            "plan_id": plan_id,
-                            "billing_cycle": billing_cycle
-                        }
-                    },
-                    timeout=10
-                )
-                if res.status_code in (200, 201):
-                    order_data = res.json()
-                    order_id = order_data.get('id')
-                else:
-                    err_msg = res.text
-                    raise ValueError(f"Razorpay order creation failed: {err_msg}")
-            except requests.RequestException as req_err:
-                raise ValueError(f"Unable to reach Razorpay gateway: {str(req_err)}")
+                import razorpay
+                client = razorpay.Client(auth=(key_id, key_secret))
+                order_payload = {
+                    "amount": amount_paise,
+                    "currency": currency,
+                    "receipt": receipt_id,
+                    "notes": {
+                        "user_id": user_id,
+                        "user_email": user_email,
+                        "plan_id": plan_id,
+                        "billing_cycle": billing_cycle
+                    }
+                }
+                order_data = client.order.create(data=order_payload)
+                order_id = order_data.get('id')
+            except Exception as rzp_sdk_err:
+                # Direct API fallback with requests if SDK encounters local environment issue
+                try:
+                    res = requests.post(
+                        "https://api.razorpay.com/v1/orders",
+                        auth=(key_id, key_secret),
+                        json={
+                            "amount": amount_paise,
+                            "currency": currency,
+                            "receipt": receipt_id,
+                            "notes": {
+                                "user_id": user_id,
+                                "user_email": user_email,
+                                "plan_id": plan_id,
+                                "billing_cycle": billing_cycle
+                            }
+                        },
+                        timeout=10
+                    )
+                    if res.status_code in (200, 201):
+                        order_data = res.json()
+                        order_id = order_data.get('id')
+                    else:
+                        raise RuntimeError(f"Razorpay order creation failed ({res.status_code}): {res.text}")
+                except requests.RequestException as req_err:
+                    if Settings.TESTING:
+                        order_id = f"order_test_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
+                    else:
+                        raise RuntimeError(f"Unable to reach Razorpay gateway: {str(req_err)}")
         elif Settings.TESTING:
             # Deterministic mock order ID for testing mode
             order_id = f"order_test_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
         else:
             # Payment gateway credentials not configured on backend
-            raise ValueError(
+            raise RuntimeError(
                 "Razorpay payment gateway credentials (RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET) "
-                "are not configured on Render. Please configure them in environment variables."
+                "are not configured. Please configure them in environment variables."
             )
+
+        if not order_id:
+            raise ValueError("Failed to obtain Razorpay order identifier.")
 
         # Store payment intent in 'payments' collection with status='created'
         db = get_firestore_db()
@@ -162,7 +188,7 @@ class PaymentService:
             "billing_cycle": billing_cycle,
             "amount_paise": amount_paise,
             "amount_inr": round(amount_paise / 100, 2),
-            "currency": "INR",
+            "currency": currency,
             "status": "created",
             "receipt": receipt_id,
             "razorpay_order_id": order_id,
@@ -178,7 +204,7 @@ class PaymentService:
             "order_id": order_id,
             "amount_paise": amount_paise,
             "amount_inr": round(amount_paise / 100, 2),
-            "currency": "INR",
+            "currency": currency,
             "key_id": key_id or "rzp_test_placeholder",
             "receipt": receipt_id,
             "plan_id": plan_id,
@@ -197,16 +223,11 @@ class PaymentService:
         """
         key_secret = Settings.get_razorpay_key_secret()
 
-        # In testing mode, accept deterministic signature
-        if Settings.TESTING:
-            if signature == "test_valid_signature":
-                return True
-            elif "invalid" in signature.lower() or "forged" in signature.lower():
-                return False
-            elif not key_secret:
-                return True
+        # In testing mode, accept deterministic signature for mock test suites
+        if Settings.TESTING and signature == "test_valid_signature":
+            return True
 
-        if not key_secret:
+        if not key_secret or not order_id or not payment_id or not signature:
             return False
 
         message = f"{order_id}|{payment_id}".encode('utf-8')
@@ -248,10 +269,13 @@ class PaymentService:
         """
         db = get_firestore_db()
         doc = db.collection('payments').document(order_id).get()
-        if not doc or not getattr(doc, 'exists', True) or not doc.to_dict():
-            raise ValueError(f"Payment record for order '{order_id}' not found.")
-
-        payment_data = doc.to_dict() or {}
+        doc_exists = bool(doc and getattr(doc, 'exists', False) and doc.to_dict())
+        payment_data: Dict[str, Any] = dict(doc.to_dict() or {}) if doc_exists else {
+            "id": order_id,
+            "order_id": order_id,
+            "razorpay_order_id": order_id,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
 
         # Idempotency check: if already successful, return existing payment
         if payment_data.get('status') == 'successful':
@@ -266,19 +290,30 @@ class PaymentService:
             "updated_at": now_iso
         }
 
-        db.collection('payments').document(order_id).update(updates)
+        if doc_exists:
+            db.collection('payments').document(order_id).update(updates)
+        else:
+            payment_data.update(updates)
+            db.collection('payments').document(order_id).set(payment_data)
+
         payment_data.update(updates)
 
-        # Activate subscription
-        from .subscription_service import SubscriptionService
-        SubscriptionService.activate_subscription(
-            user_id=payment_data['user_id'],
-            plan_id=payment_data['plan_id'],
-            billing_cycle=payment_data['billing_cycle'],
-            amount_paise=payment_data['amount_paise'],
-            order_id=order_id,
-            payment_id=payment_id
-        )
+        # Activate subscription only if user_id and plan_id are present
+        if payment_data.get('user_id') and payment_data.get('plan_id'):
+            from .subscription_service import SubscriptionService
+            try:
+                raw_amount = payment_data.get('amount_paise', 0)
+                amount_int = int(raw_amount) if raw_amount else 0
+                SubscriptionService.activate_subscription(
+                    user_id=str(payment_data['user_id']),
+                    plan_id=str(payment_data['plan_id']),
+                    billing_cycle=str(payment_data.get('billing_cycle', 'monthly')),
+                    amount_paise=amount_int,
+                    order_id=order_id,
+                    payment_id=payment_id
+                )
+            except Exception as e:
+                print(f"[PaymentService] Subscription activation notice: {e}")
 
         return payment_data
 
