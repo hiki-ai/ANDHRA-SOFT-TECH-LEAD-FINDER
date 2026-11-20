@@ -23,7 +23,7 @@ class TestRazorpayStandardCheckout(unittest.TestCase):
         Settings.TESTING = True
         cls.app = create_app('testing')
         cls.client = cls.app.test_client()
-        cls.key_secret = Settings.get_razorpay_key_secret() or "6E3YSwoSDcW0zOEdiEwIQ5OV"
+        cls.key_secret = Settings.get_razorpay_key_secret() or "13M88yeaFvUcFyysxitr4Wfc"
 
     def test_01_create_order_success(self):
         """Test POST /api/create-order with valid amount (>= 100 paise)."""
